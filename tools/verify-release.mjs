@@ -42,6 +42,29 @@ export function validateRelease(release, version, published) {
   }
 }
 
+export function prepareManifest(manifest, release, version, signature) {
+  validateRelease(release, version, false);
+  const installer = release.assets.find(asset => asset.name === installerName(version));
+  const prepared = structuredClone(manifest);
+  for (const target of ['windows-x86_64', 'windows-x86_64-nsis']) {
+    const platform = prepared.platforms?.[target];
+    assert.ok(platform, `Missing updater target: ${target}`);
+    assert.ok([installerUrl(version), `https://api.github.com/repos/${repository}/releases/assets/${installer.id}`].includes(platform.url), `Unexpected source asset for ${target}`);
+    platform.url = installerUrl(version);
+  }
+  validateManifest(prepared, version, signature);
+  return prepared;
+}
+
+function draftRelease(version) {
+  // GitHub's release-by-tag endpoint excludes drafts, including for owners.
+  const releases = JSON.parse(execFileSync('gh', ['api', '--paginate', '--slurp', `repos/${repository}/releases?per_page=100`], {encoding: 'utf8'})).flat();
+  const release = releases.find(release => release.tag_name === `v${version}`);
+  assert.ok(release, `Draft release v${version} was not found`);
+  validateRelease(release, version, false);
+  return release;
+}
+
 export function verifySource() {
   const config = json('desktop/src-tauri/tauri.conf.json');
   const pkg = json('desktop/package.json');
@@ -117,12 +140,18 @@ async function main() {
   }
   assert.ok(directory, 'An asset directory is required');
   if (mode === '--assets') verifyAssets(directory, version);
+  else if (mode === '--prepare-draft') {
+    const signature = readFileSync(join(directory, `${installerName(version)}.sig`), 'utf8');
+    const manifest = prepareManifest(json(join(directory, 'latest.json')), draftRelease(version), version, signature);
+    const destination = join(directory, 'latest.json');
+    writeFileSync(destination, JSON.stringify(manifest, null, 2) + '\n');
+    execFileSync('gh', ['release', 'upload', `v${version}`, destination, '--repo', repository, '--clobber'], {stdio: 'inherit'});
+    execFileSync('gh', ['release', 'download', `v${version}`, '--repo', repository, '--dir', directory, '--pattern', 'latest.json', '--clobber'], {stdio: 'inherit'});
+    validateManifest(json(destination), version, signature);
+    console.log('Uploaded updater manifest uses public installer URLs; downloaded copy verified.');
+  }
   else if (mode === '--draft') {
-    // GitHub's release-by-tag endpoint excludes drafts, including for owners.
-    const releases = JSON.parse(execFileSync('gh', ['api', '--paginate', '--slurp', `repos/${repository}/releases?per_page=100`], {encoding: 'utf8'})).flat();
-    const release = releases.find(release => release.tag_name === `v${version}`);
-    assert.ok(release, `Draft release v${version} was not found`);
-    validateRelease(release, version, false);
+    draftRelease(version);
     verifyAssets(directory, version);
   }
   else if (mode === '--published') await verifyPublished(directory, version);

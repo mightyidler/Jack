@@ -59,4 +59,6 @@ GitHub Secrets에 `TAURI_SIGNING_PRIVATE_KEY`를 등록한다. 암호가 있는 
 
 배포 작업은 초안의 설치 파일·서명·`latest.json`을 다시 내려받아 버전·주소·플랫폼·서명을 대조한다. Rust 업데이터의 실제 manifest 파서와 기존 0.1.4·0.1.5 공개 키로 호환성을 확인하고 변조된 바이트의 거부도 검사한다. 통과하면 정식 공개하면서 Latest로 지정하고, 인증 없는 `releases/latest/download/latest.json`과 설치 파일·서명을 다시 내려받아 검증한다. 초안만 생성한 상태나 Actions의 빌드 성공만으로 배포 완료로 간주하지 않는다. 공개 후 확인 단계만 실패한 경우 파일을 재빌드하거나 덮어쓰지 말고 `node tools/verify-release.mjs --published artifacts/distribution/public`으로 확인을 재실행한다. 실제 앱 내 설치·재시작·오디오 확인은 별도이며 배포 기록에서 구분한다.
 
+Tauri Action이 `latest.json`에 API asset URL을 생성하면 인증된 릴리즈 메타데이터의 설치 파일 ID와 대조한 뒤 공개 `releases/download/v버전/설치파일` 주소로 변환한다. 서명은 그대로 유지하고 수정한 manifest를 다시 내려받아 검사한다. 서명 빌드까지 성공한 초안에서 배포 메타데이터만 수정할 때는 Actions의 `reuse_draft`를 사용할 수 있다. 이때 main의 배포 도구를 사용하되 앱·의존성·툴체인·라이선스 소스가 태그와 정확히 같아야 하며, 전체 검사와 서명/공개 검증을 다시 통과해야 한다. 이미 생성된 설치 파일과 서명은 재빌드하거나 교체하지 않는다.
+
 GG 최신 조회는 공식 최신 주소의 HTTPS 리다이렉트와 파일명에서 버전을 확인한다. 응답이 바뀌면 확인 실패로 처리한다. 설치에는 유효한 Authenticode 서명과 허용된 게시자(SteelSeries ApS/A/S 또는 GN Hearing A/S)가 필요하다. 자동 무인 설치는 사용하지 않는다.

@@ -7,6 +7,10 @@ on:
       tag:
         description: Existing version tag (for example v0.1.0)
         required: true
+      reuse_draft:
+        description: Verify and publish an existing signed draft with unchanged app sources
+        type: boolean
+        default: false
 permissions:
   contents: write
 concurrency:
@@ -20,8 +24,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ inputs.reuse_draft && github.sha || inputs.tag || github.ref }}
           fetch-depth: 0
+      - name: Require identical app sources when reusing a signed draft
+        if: ${{ inputs.reuse_draft == true }}
+        shell: pwsh
+        run: |
+          git diff --exit-code $env:RELEASE_TAG -- desktop crates Cargo.toml Cargo.lock rust-toolchain.toml .node-version THIRD_PARTY_LICENSES.txt THIRD_PARTY_NOTICES.md LICENSE
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/setup-node@v7.1.0
         with:
           node-version-file: '.node-version'
@@ -53,6 +63,7 @@ jobs:
           $notes = Get-Content docs/release-notes.md -Raw
           @('body<<JACK_RELEASE_NOTES', $notes, 'JACK_RELEASE_NOTES') | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
       - name: Build signed installer and draft release
+        if: ${{ inputs.reuse_draft != true }}
         id: build
         uses: tauri-apps/tauri-action@action-v1.0.0
         env:
@@ -79,6 +90,8 @@ jobs:
         run: |
           $assets = Join-Path $env:RUNNER_TEMP 'jack-draft-assets'
           gh release download $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --dir $assets --pattern '*.exe' --pattern '*.sig' --pattern latest.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node tools/verify-release.mjs --prepare-draft $assets
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node tools/verify-release.mjs --draft $assets
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {validateManifest, validateRelease, installerName, installerUrl, isNewerVersion} from './verify-release.mjs';
+import {validateManifest, validateRelease, prepareManifest, installerName, installerUrl, isNewerVersion} from './verify-release.mjs';
 
 const version = '0.1.6';
 const signature = Buffer.from('untrusted comment: signature from tauri secret key\nfixture').toString('base64');
@@ -18,8 +18,20 @@ function manifest() {
 }
 function release() {
   return {tag_name: `v${version}`, draft: false, prerelease: false, assets:
-    [installerName(version), `${installerName(version)}.sig`, 'latest.json'].map(name => ({name, size: 100}))};
+    [installerName(version), `${installerName(version)}.sig`, 'latest.json'].map((name, index) => ({id: index + 100, name, size: 100}))};
 }
+
+test('action API URLs are converted only when they identify the verified draft installer', () => {
+  const draft = release(); draft.draft = true;
+  const input = manifest();
+  for (const platform of Object.values(input.platforms)) platform.url = 'https://api.github.com/repos/mightyidler/Jack/releases/assets/100';
+  const prepared = prepareManifest(input, draft, version, signature);
+  validateManifest(prepared, version, signature);
+  assert.equal(input.platforms['windows-x86_64'].url, 'https://api.github.com/repos/mightyidler/Jack/releases/assets/100');
+  input.platforms['windows-x86_64'].url = 'https://api.github.com/repos/mightyidler/Jack/releases/assets/999';
+  assert.throws(() => prepareManifest(input, draft, version, signature));
+  assert.throws(() => prepareManifest(manifest(), release(), version, signature));
+});
 
 test('public stable release requires all updater assets and rejects the previous draft-only failure', () => {
   validateRelease(release(), version, true);

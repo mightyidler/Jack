@@ -42,4 +42,83 @@ foreach ($signatureCase in @(
     if ($signatureCase.accept) { Assert-SteelSeriesSignature 'unused.exe' }
     else { Must-Fail { Assert-SteelSeriesSignature 'unused.exe' } }
 }
-Write-Output 'GG setup: syntax, official-host restrictions, consent, duplicate-install and downgrade guards passed.'
+# Exercise the real download/validation/cleanup flow using inert compiled metadata
+# and in-memory HTTP responses. Start-Process is replaced; no fixture is run.
+Add-Type -AssemblyName System.Net.Http
+$fixtureDirectory = Join-Path ([IO.Path]::GetTempPath()) ('Jack-GG-tests-' + [Guid]::NewGuid().ToString('N'))
+$null = New-Item -ItemType Directory -Path $fixtureDirectory
+$goodFixture = Join-Path $fixtureDirectory 'good.dll'
+$wrongFixture = Join-Path $fixtureDirectory 'wrong.dll'
+$compiler = Join-Path $env:SystemRoot 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
+try {
+    foreach ($fixture in @(@{path=$goodFixture;product='SteelSeries GG';name='Good'}, @{path=$wrongFixture;product='Unrelated';name='Wrong'})) {
+        $sourcePath = $fixture.path + '.cs'
+        [IO.File]::WriteAllText($sourcePath, @"
+using System.Reflection;
+[assembly: AssemblyProduct("$($fixture.product)")]
+[assembly: AssemblyInformationalVersion("130.0.0")]
+[assembly: AssemblyFileVersion("130.0.0.0")]
+public class $($fixture.name)MetadataFixture { }
+"@)
+        & $compiler /nologo /target:library "/out:$($fixture.path)" $sourcePath
+        if ($LASTEXITCODE -ne 0) { throw 'Metadata fixture compilation failed.' }
+    }
+    function Get-LatestGg { @{version='130.0.0';url='https://engine.steelseriescdn.com/SteelSeriesGG130.0.0Setup.exe'} }
+    function Get-GgInstallation {
+        if ($script:launched -and $script:scenario.confirm) { return @{installed=$true;version='130.0.0'} }
+        @{installed=!!$script:scenario.before;version=$script:scenario.before}
+    }
+    function Assert-SteelSeriesSignature([string]$Path) {
+        $script:downloadPath = $Path
+        if (!$script:scenario.signature) { throw 'Test signature rejection.' }
+    }
+    function New-DownloadClient {
+        $script:fetches++
+        $client = [pscustomobject]@{}
+        $client | Add-Member ScriptMethod GetAsync {
+            param($Url, $Completion)
+            $response = [Net.Http.HttpResponseMessage]::new([Net.HttpStatusCode]$script:scenario.http)
+            $response.Content = [Net.Http.ByteArrayContent]::new([byte[]]$script:fixtureBytes)
+            $task = [Threading.Tasks.TaskCompletionSource[Net.Http.HttpResponseMessage]]::new()
+            $task.SetResult($response)
+            $task.Task
+        }
+        $client | Add-Member ScriptMethod Dispose { }
+        $client
+    }
+    function Start-Process {
+        param($FilePath, $Verb, $WindowStyle, [switch]$Wait, [switch]$PassThru)
+        if ($Verb -ne 'RunAs' -or $WindowStyle -ne 'Normal' -or !$Wait -or !$PassThru) { throw 'Interactive consent/UAC flags changed.' }
+        $script:launched = $true
+        [pscustomobject]@{ExitCode=$script:scenario.exit}
+    }
+    foreach ($script:scenario in @(
+        @{name='fresh';before=$null;exit=0;confirm=$true;signature=$true;http=200;success=$true;start=$true},
+        @{name='upgrade';before='120.0.0';exit=0;confirm=$true;signature=$true;http=200;success=$true;start=$true},
+        @{name='reboot';before=$null;exit=3010;confirm=$true;signature=$true;http=200;success=$true;start=$true},
+        @{name='cancel';before=$null;exit=1602;confirm=$false;signature=$true;http=200;success=$false;start=$true},
+        @{name='unconfirmed';before=$null;exit=0;confirm=$false;signature=$true;http=200;success=$false;start=$true},
+        @{name='signature';before=$null;signature=$false;http=200;success=$false;start=$false},
+        @{name='product';before=$null;signature=$true;http=200;success=$false;start=$false},
+        @{name='http';before=$null;signature=$true;http=503;success=$false;start=$false}
+    )) {
+        $script:launched = $false; $script:fetches = 0; $script:downloadPath = $null
+        $fixturePath = if ($scenario.name -eq 'product') { $wrongFixture } else { $goodFixture }
+        $script:fixtureBytes = [IO.File]::ReadAllBytes($fixturePath)
+        if ($scenario.success) {
+            $result = Install-LatestGg
+            if ($result.result -ne 'installed' -or $result.version -ne '130.0.0' -or $result.reboot_required -ne ($scenario.exit -eq 3010)) { throw "Incorrect result: $($scenario.name)" }
+        } else { Must-Fail { Install-LatestGg } }
+        if ($script:fetches -ne 1 -or $script:launched -ne $scenario.start) { throw "Unexpected download/launch: $($scenario.name)" }
+        if ($script:downloadPath -and (Test-Path -LiteralPath (Split-Path $script:downloadPath -Parent))) { throw 'Installer temporary directory was not cleaned.' }
+    }
+    $Consent = $false; $script:fetches = 0; $script:launched = $false
+    Must-Fail { Install-LatestGg }
+    if ($script:fetches -or $script:launched) { throw 'Consent refusal performed a download or launch.' }
+} finally {
+    foreach ($file in @($goodFixture, $wrongFixture, ($goodFixture + '.cs'), ($wrongFixture + '.cs'))) {
+        if (Test-Path -LiteralPath $file) { Remove-Item -LiteralPath $file -Force }
+    }
+    Remove-Item -LiteralPath $fixtureDirectory -Force
+}
+Write-Output 'GG setup: host/signature/consent/reuse guards and mocked install/upgrade/reboot/failure/cleanup passed. No installer was executed.'

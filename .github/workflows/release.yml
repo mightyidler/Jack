@@ -50,6 +50,9 @@ jobs:
         with:
           projectPath: desktop
           tagName: ${{ env.RELEASE_TAG }}
+          # The existing tag fixes the build; main avoids workflow-write scope checks
+          # when another commit is pushed while a tagged release is building.
+          releaseCommitish: main
           releaseName: Jack ${{ env.RELEASE_TAG }}
           releaseBody: 'Windows 11 x64용 Jack 배포 후보입니다. SteelSeries GG / Sonar Classic이 필요합니다. 설치·업데이트의 실제 PC 확인은 진행 중입니다. 설치 조건과 제한은 README를 참고하세요.'
           releaseDraft: true

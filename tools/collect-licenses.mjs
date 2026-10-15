@@ -3,7 +3,7 @@ import {readFileSync,readdirSync,writeFileSync,statSync} from 'node:fs';
 import {dirname,join,resolve} from 'node:path';
 import {spawnSync} from 'node:child_process';
 const root=resolve(import.meta.dirname,'..');
-const metadata=spawnSync('cargo',['metadata','--locked','--format-version','1','--filter-platform','x86_64-pc-windows-msvc'],{cwd:root,encoding:'utf8',maxBuffer:32*1024*1024});
+const metadata=spawnSync('cargo',['metadata','--locked','--format-version','1','--manifest-path','desktop/src-tauri/Cargo.toml','--features','tauri/custom-protocol','--filter-platform','x86_64-pc-windows-msvc'],{cwd:root,encoding:'utf8',maxBuffer:32*1024*1024});
 if(metadata.status!==0)throw new Error(metadata.stderr);
 const packages=JSON.parse(metadata.stdout).packages.filter(pkg=>pkg.source);
 const overrides={

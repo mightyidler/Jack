@@ -70,6 +70,8 @@ pub enum Action {
     },
     Reset,
     #[serde(skip)]
+    InitializeStartup,
+    #[serde(skip)]
     UpdatePause {
         paused: bool,
     },
@@ -299,7 +301,6 @@ impl Owner {
                 .map_err(|e| e.to_string())?
                 .display()
         );
-        settings.launch_at_login = read_startup()?.as_deref() == Some(&launch_command);
         // The desktop product now always uses groups, including legacy OFF profiles.
         settings.channel_separation_enabled = true;
         let fixed = fixed_builtin_groups(&settings);
@@ -321,7 +322,6 @@ impl Owner {
         })
     }
     fn view(&mut self) -> Reply {
-        self.settings.launch_at_login = read_startup()?.as_deref() == Some(&self.launch_command);
         let mut sonar = self.sonar.refresh(false);
         let mut remembered = self.settings.clone();
         if crate::group_outputs::remember(&mut remembered, &sonar) {
@@ -390,22 +390,28 @@ impl Owner {
         })
     }
     fn preferences(&mut self, next: Settings) -> Result<(), String> {
+        self.apply_preferences(next, false)
+    }
+    fn apply_preferences(
+        &mut self,
+        next: Settings,
+        synchronize_startup: bool,
+    ) -> Result<(), String> {
         if !matches!(next.language.as_str(), "ko" | "en") {
             return Err("unsupported language".into());
         }
         let previous = read_startup()?;
         let desired = next.launch_at_login.then_some(self.launch_command.as_str());
-        if next.launch_at_login != (previous.as_deref() == Some(&self.launch_command)) {
-            if previous
-                .as_deref()
-                .is_some_and(|s| s != self.launch_command)
-            {
-                return Err("Jack startup entry belongs to another installation".into());
-            }
+        let change_startup =
+            synchronize_startup || next.launch_at_login != self.settings.launch_at_login;
+        if change_startup && previous.as_deref() != desired {
             write_startup(desired)?;
+            if read_startup()?.as_deref() != desired {
+                return Err("Windows startup setting could not be confirmed".into());
+            }
         }
         if let Err(error) = jack_core::settings::save(&self.settings_path, &next) {
-            if read_startup()?.as_deref() == desired {
+            if change_startup && read_startup()?.as_deref() == desired {
                 write_startup(previous.as_deref())?;
             }
             return Err(error.to_string());
@@ -423,6 +429,9 @@ impl Owner {
             return Err("Jack is preparing an update".into());
         }
         match action {
+            Action::InitializeStartup => {
+                self.apply_preferences(initial_startup_preferences(&self.settings), true)?;
+            }
             Action::UpdatePause { paused } => {
                 if paused && !self.update_paused {
                     let sonar = self.sonar.refresh(false);
@@ -648,6 +657,7 @@ impl Owner {
                 next.theme = theme;
                 next.language = language;
                 next.launch_at_login = launch_at_login;
+                next.startup_preference_initialized = true;
                 self.preferences(next)?;
             }
             Action::TrayShortcut {
@@ -668,6 +678,7 @@ impl Owner {
                 self.app_routing.restore_live(&mut self.routes, &sonar)?;
                 self.preferences(fixed_builtin_groups(&Settings {
                     channel_separation_enabled: true,
+                    startup_preference_initialized: true,
                     ..Settings::default()
                 }))?;
             }
@@ -726,6 +737,14 @@ impl Owner {
         }
         self.view()
     }
+}
+fn initial_startup_preferences(settings: &Settings) -> Settings {
+    let mut next = settings.clone();
+    if !next.startup_preference_initialized {
+        next.launch_at_login = true;
+        next.startup_preference_initialized = true;
+    }
+    next
 }
 fn auxiliary_group_name(language: &str) -> &'static str {
     if language == "en" { "Aux" } else { "보조" }
@@ -994,6 +1013,25 @@ fn write_startup(value: Option<&str>) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn startup_default_on_migrates_legacy_preferences_once_and_preserves_explicit_off() {
+        let legacy = Settings {
+            launch_at_login: false,
+            ..Settings::default()
+        };
+        let migrated = initial_startup_preferences(&legacy);
+        assert!(migrated.launch_at_login);
+        assert!(migrated.startup_preference_initialized);
+        assert_eq!(migrated.groups, legacy.groups);
+        assert_eq!(migrated.sonar_app_overrides, legacy.sonar_app_overrides);
+        let explicit_off = Settings {
+            launch_at_login: false,
+            ..migrated
+        };
+        let saved = serde_json::to_vec(&explicit_off).unwrap();
+        let loaded = serde_json::from_slice(&saved).unwrap();
+        assert_eq!(initial_startup_preferences(&loaded), explicit_off);
+    }
     use jack_core::routing::RoutingError;
     use std::collections::BTreeMap;
     struct Policy {

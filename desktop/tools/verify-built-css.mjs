@@ -1,4 +1,5 @@
 import {readFileSync,readdirSync} from 'node:fs';
+import {cssTimeMs} from '../src/motion-time.ts';
 
 // Vite 8's minifier can discard Chromium's standard property when the prefixed
 // declaration follows it. Check the shipped CSS, not just the source stylesheet.
@@ -14,3 +15,11 @@ for (const selector of ['.header','.sonar-output-menu','.confirm-dialog']) {
   }
 }
 console.log('Built CSS: Chromium backdrop-filter preserved for header, menus and dialog.');
+const toast = [...css.matchAll(/\.toast\{([^}]+)\}/g)].find(match=>match[1].includes('--toast-visible-time'));
+if (!toast || cssTimeMs(toast[1].match(/--toast-visible-time:([^;}]+)/)?.[1]??'',NaN)!==3000) {
+  throw new Error('Built CSS toast lifetime must resolve to 3000 milliseconds.');
+}
+if(!/transition:opacity (?:\.2s|200ms),transform (?:\.2s|200ms)/.test(toast[1])) {
+  throw new Error('Built CSS must preserve Bald toast transition timing.');
+}
+console.log('Built CSS: Bald toast transition 200ms and lifetime 3000ms preserved.');

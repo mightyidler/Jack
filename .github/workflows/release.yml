@@ -28,6 +28,7 @@ jobs:
           cache-dependency-path: desktop/package-lock.json
       - uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: '1.95.0'
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - run: npm ci

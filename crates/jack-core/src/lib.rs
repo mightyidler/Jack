@@ -77,6 +77,8 @@ pub struct Settings {
     #[serde(default = "enabled_by_default")]
     pub link_group_outputs: bool,
     pub launch_at_login: bool,
+    #[serde(default)]
+    pub startup_preference_initialized: bool,
     pub theme: Theme,
     pub language: String,
     pub groups: Vec<AudioGroup>,
@@ -95,7 +97,8 @@ impl Default for Settings {
             tray_shortcut: TrayShortcut::default(),
             channel_separation_enabled: false,
             link_group_outputs: true,
-            launch_at_login: false,
+            launch_at_login: true,
+            startup_preference_initialized: false,
             theme: Theme::System,
             language: "ko".into(),
             groups: [(GAMING, "게이밍"), (CHAT, "채팅"), (MEDIA, "미디어")]

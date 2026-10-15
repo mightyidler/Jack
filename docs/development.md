@@ -1,6 +1,6 @@
 # 개발·배포
 
-Windows 11 x64, Rust stable MSVC, Visual Studio C++ Build Tools, Node.js 24가 필요하다.
+Windows 11 x64, Rust 1.95.0 MSVC, Visual Studio C++ Build Tools, Node.js 24가 필요하다.
 
 ```powershell
 cd desktop

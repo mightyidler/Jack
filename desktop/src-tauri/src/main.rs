@@ -497,6 +497,10 @@ fn main() {
             app.manage(tray_menu::State::default());
             app.manage(tray_shortcut::State::default());
             app.manage(Broker::start().map_err(std::io::Error::other)?);
+            // Production startup registration is separate from audio diagnostics.
+            if let Err(error) = app.state::<Broker>().call(Action::InitializeStartup) {
+                eprintln!("Could not register Jack startup: {error}");
+            }
             let open = MenuItem::with_id(app, "open", "Jack 열기", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Jack 종료", true, None::<&str>)?;
             app.manage(TrayLabels {

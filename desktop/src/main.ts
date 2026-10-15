@@ -24,7 +24,7 @@ import './fluid-controls.css';
 import { setShortcutLabel } from './shortcut-motion';
 import { cssTimeMs } from './motion-time';
 import './rendering.css';
-import { distributionSettings, distributionBusy } from './distribution';
+import { showToast, updateSection } from './bald-updates';
 
 type Flow = 'render' | 'capture';
 type Theme = 'system' | 'dark' | 'light';
@@ -156,7 +156,7 @@ async function act(action: Record<string, unknown>) {
   const focusId = (document.activeElement as HTMLElement)?.id;
   busy = true; error = ''; updateDisabled();
   try { state = await invoke<ViewState>('audio_action',{action}); }
-  catch (e) { error = String(e); try { state = await invoke<ViewState>('audio_action',{action:{kind:'read'}}); } catch { /* preserve the original error */ } }
+  catch (e) { error = String(e); showToast(error,7000); try { state = await invoke<ViewState>('audio_action',{action:{kind:'read'}}); } catch { /* preserve the original error */ } }
   finally { busy = false; render(); if (focusId) document.getElementById(focusId)?.focus(); }
 }
 function updateDisabled() { app.querySelectorAll<HTMLButtonElement | HTMLSelectElement>('[data-control]').forEach(el => {
@@ -213,7 +213,6 @@ function render() {
     if (tab === 'capture') content.append(deviceList('capture'));
     else content.append(sonarChannels());
   }
-  if (error && state) { const notice = element('div','error',error); notice.role = 'alert'; content.append(notice); }
   frame.append(content);
   if (!native && params.get('fixture') !== 'design') frame.append(element('p','preview-label',m.preview));
   const previous=oldPanel?.classList.contains(tab) ? oldPanel.querySelector<HTMLButtonElement>('.switch[id]') : null;
@@ -302,8 +301,7 @@ function renderSettings(content: HTMLElement) {
   }
   envCard.append(selectRow(m.language,'language-select',['ko','en'],['한국어','English'],s.language,v => preferences({language:v})),element('div','setting-divider'),selectRow(m.theme,'theme-select',['system','light','dark'],[m.system,m.light,m.dark],s.theme,v => preferences({theme:v as Theme}))); env.append(envCard);
   const ops = element('div','card operations'); const reset = control(button(m.reset,'operation danger',resetDialog)); reset.id = 'reset-button';
-  const quit = button(m.quit,'operation',() => { if (native && !busy) void invoke('quit').catch(e => { error = String(e); render(); }); }); quit.disabled = !native; ops.append(reset,element('div','setting-divider'),quit); content.append(startup,shortcuts,env,
-    distributionSettings(english,native,state!.sonar,render,async()=>{await act({kind:'sonar_retry'});}),ops);
+  const quit = button(m.quit,'operation',() => { if (native && !busy) void invoke('quit').catch(e => { error = String(e); showToast(error,7000); render(); }); }); quit.disabled = !native; ops.append(reset,element('div','setting-divider'),quit); content.append(startup,shortcuts,env,updateSection(english,native,render,()=>state?.settings.language==='en'),ops);
 }
 function shortcutLabel(shortcut:TrayShortcut,english:boolean) {
   if(!shortcut.key)return english?'Set shortcut':'단축키 지정';
@@ -396,7 +394,6 @@ function sonarConnection() {
       disconnected:'SteelSeries GG를 실행하고 Sonar를 켜 주세요. 자동으로 다시 연결합니다.',
     };
     section.append(element('p','item-hint',hints[sonar.connection] ?? hints.disconnected),
-      control(button(english?'Installation and connection':'설치 및 연결','retry',()=>{tab='settings';render();})),
       control(button(t().retry,'retry',() => void act({kind:'sonar_retry'}))));
   }
   return section;
@@ -694,7 +691,6 @@ function renderQuick() {
     const inner=element('div','t-acc-panel-inner');inner.inert=!inputExpanded;inner.append(deviceList('capture',false));
     body.append(inner);accordion.append(head,body);content.append(accordion);
   }
-  if(state && error){const notice=element('p','error',error);notice.role='alert';content.append(notice);}
   quickSurface!.show(content,!native || visible);
   if(focused)document.getElementById(focused)?.focus({preventScroll:true});
 }
@@ -783,7 +779,7 @@ function bindVolume(row: HTMLButtonElement, fill: HTMLElement, device: Endpoint,
   });
 }
 async function refresh(force = false) {
-  if (busy || distributionBusy() || dragging || windowDragging || shortcutRecording || (!force && (document.hidden || !visible))) return;
+  if (busy || dragging || windowDragging || shortcutRecording || (!force && (document.hidden || !visible))) return;
   // A focused, closed picker must not stop external changes from reaching the UI.
   // Keep an actually open native menu intact while a background read finishes.
   const editing = () => (quick && quickSurface?.moving) || !!document.querySelector('.sonar-output-open:active, dialog[open], [popover]:popover-open') || (CSS.supports('selector(select:open)')
@@ -792,7 +788,7 @@ async function refresh(force = false) {
   try {
     if (native && !editing()) {
       const next = await invoke<ViewState>('audio_action',{action:{kind:'read'}});
-      if (requestedRevision !== revision || busy || distributionBusy() || dragging || windowDragging || shortcutRecording || editing()) return;
+      if (requestedRevision !== revision || busy || dragging || windowDragging || shortcutRecording || editing()) return;
       const visible = (value: ViewState | null) => value ? JSON.stringify([
         value.settings,value.audio.endpoints.map(({id,name,flow,form_factor})=>[id,name,flow,form_factor]),value.separation_available,
         value.sonar.connection,value.sonar.mode,value.sonar.volumes,value.sonar.routes,value.sonar.devices,value.sonar.applications,
@@ -800,7 +796,7 @@ async function refresh(force = false) {
       ]) : '';
       if (visible(next) !== visible(state)) { state = next; render(); void reportNative().catch(e => { error = String(e); render(); }); }
     }
-  } catch (e) { if (requestedRevision === revision) { error = String(e); render(); } }
+  } catch (e) { if (requestedRevision === revision) { const message=String(e);if(state&&error!==message)showToast(message,7000);error=message;render(); } }
 }
 function fixture(): ViewState {
   const names = ['Razer BlackShark V2 Pro','LG TV SSCR2(NVIDIA High Definition Audio)','Sony WH-1000XM6','Speaker'];
@@ -883,7 +879,7 @@ if (params.has('tray-menu')) {
       if(state)state.settings=event.payload;
       theme();if(!busy)render();
     });
-    void listen<string>('jack-error',e => { error = e.payload; render(); });
+    void listen<string>('jack-error',e => { error = e.payload; showToast(error,7000); render(); });
     void listen<boolean>('jack-visibility',e => { visible = e.payload; if (quick) document.documentElement.dataset.popupOpen=String(visible); if (!visible) cancelDrag?.(); if (visible) void refresh(); });
     void listen<QuickLayout>('jack-popup-layout',e=>{if(quick)applyQuickLayout(e.payload);});
     void listen('jack-popup-hidden',()=>{if(quick && !visible){quickOutputGroup=null;renderQuick();}});

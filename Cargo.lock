@@ -1873,7 +1873,7 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "jack-audio-probe"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "jack-core",
  "jack-sonar",
@@ -1884,7 +1884,7 @@ dependencies = [
 
 [[package]]
 name = "jack-core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -1896,7 +1896,7 @@ dependencies = [
 
 [[package]]
 name = "jack-desktop"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "base64 0.22.1",
  "image",
@@ -1917,7 +1917,7 @@ dependencies = [
 
 [[package]]
 name = "jack-engine"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "serde",
  "uuid",
@@ -1925,7 +1925,7 @@ dependencies = [
 
 [[package]]
 name = "jack-sonar"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "reqwest",
  "rustls",
@@ -1940,7 +1940,7 @@ dependencies = [
 
 [[package]]
 name = "jack-windows-audio"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "jack-core",
  "jack-engine",

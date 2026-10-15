@@ -37,6 +37,8 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+      - run: node --test tools/live-volume.test.mjs tools/application-groups.test.mjs
+        working-directory: desktop
       - run: pwsh -NoProfile -File tools/verify-gg-setup.ps1
       - name: Build signed installer and draft release
         uses: tauri-apps/tauri-action@v0
@@ -56,7 +58,7 @@ jobs:
       - name: Verify built installer signature and tamper rejection
         shell: pwsh
         run: |
-          $installer = Get-ChildItem target/release/bundle/nsis/*_x64-setup.exe
-          if (@($installer).Count -ne 1) { throw 'Expected exactly one installer' }
+          $version = (Get-Content desktop/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $installer = Get-Item "target/release/bundle/nsis/Jack_${version}_x64-setup.exe"
           cargo run -p jack-desktop --example verify-update -- $installer.FullName
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

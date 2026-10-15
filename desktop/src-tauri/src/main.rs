@@ -186,13 +186,22 @@ fn hide_to_tray(window: tauri::WebviewWindow) -> Result<(), String> {
     Ok(())
 }
 #[tauri::command]
-fn open_devtools(window: tauri::WebviewWindow) {
-    if window.label() == "quick" {
-        popup::inspect(window.app_handle());
+fn open_devtools(window: tauri::WebviewWindow) -> Result<(), String> {
+    #[cfg(debug_assertions)]
+    {
+        if window.label() == "quick" {
+            popup::inspect(window.app_handle());
+        }
+        // WebView2 supports opening the inspector, but Wry's Windows close/status
+        // APIs are no-ops. Close the inspector with its own window controls.
+        window.open_devtools();
+        Ok(())
     }
-    // WebView2 supports opening the inspector, but Wry's Windows close/status
-    // APIs are no-ops. Close the inspector with its own window controls.
-    window.open_devtools();
+    #[cfg(not(debug_assertions))]
+    {
+        let _ = window;
+        Err("Developer tools are disabled in release builds".into())
+    }
 }
 #[tauri::command]
 fn minimize_window(window: tauri::WebviewWindow) -> Result<(), String> {

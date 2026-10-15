@@ -40,7 +40,7 @@ export function groupApplications(
     groups.set(key, members);
   }
   return [...groups.values()].map(members => {
-    const ordered = [...members].sort((a,b) => Number(b.activity === 'active') - Number(a.activity === 'active') || a.process_id - b.process_id);
+    const ordered = members.sort((a,b) => Number(b.activity === 'active') - Number(a.activity === 'active') || a.process_id - b.process_id);
     return {
       session: {...ordered[0], routing_error: members.some(member => member.routing_error)},
       process_ids: ordered.map(member => member.process_id),

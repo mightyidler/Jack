@@ -2,11 +2,25 @@
 
 Windows 11 x64, Rust 1.95.0 MSVC, Visual Studio C++ Build Tools, Node.js 24가 필요하다.
 
+UI만 테스트할 때는 Node.js 24만 있으면 된다. Rust 빌드·설치·릴리즈 없이 다음 명령으로 미리보기 선택 페이지를 연다.
+
+```powershell
+cd desktop
+npm ci
+npm run dev:ui
+```
+
+`http://127.0.0.1:1421/ui.html`에서 출력·마이크·설정·트레이 화면, 테마, 언어, 장치 상태와 그룹 수를 선택한다. 소스를 저장하면 Vite가 즉시 반영한다. 볼륨·장치 선택·앱 이동·그룹 추가/삭제·설정·단축키는 메모리의 샘플 데이터만 바꾸며, 미리보기 초기화로 원래 상태로 돌아간다. 실제 오디오 제어, GG 연결, 업데이트, 시작 프로그램 등록, 네이티브 창 배치는 아래 개발 앱에서 확인한다.
+
+네이티브 개발 앱 실행:
+
 ```powershell
 cd desktop
 npm ci
 npm run tauri -- dev
 ```
+
+F12 / Ctrl+Shift+I 개발자 도구는 네이티브 디버그 모드에서만 허용한다. 릴리즈에서는 Tauri `devtools` 기능을 포함하지 않고 `open_devtools` 호출도 거절한다. 브라우저 UI 테스트에서는 브라우저 개발자 도구를 사용할 수 있다.
 
 소스 검사:
 
@@ -16,10 +30,14 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cd desktop
+npm run lint
+npm test
 npm run build
 ```
 
 오디오·화면을 조작하는 진단 도구는 일반 검사에서 실행하지 않는다.
+
+프런트엔드 정적 폰트의 원본과 생성 기록은 `desktop/font-sources`에 보관한다. 앱에는 `desktop/public/assets/fonts`의 정적 폰트만 포함한다. 아이콘은 Windows NSIS 배포에 사용하는 파일과 재생성용 원본 `desktop/src-tauri/icons/icon.png`를 보관한다.
 
 의존성을 바꾸면 `node tools/collect-licenses.mjs`로 원문 고지를 갱신한다. 레지스트리 패키지에 없는 원문은 `licenses/vendor/sources.json`의 출처와 함께 보존한다.
 

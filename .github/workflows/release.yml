@@ -44,7 +44,7 @@ jobs:
         if: ${{ inputs.run_checks == true }}
       - run: cargo test --workspace
         if: ${{ inputs.run_checks == true }}
-      - run: node --test tools/live-volume.test.mjs tools/application-groups.test.mjs
+      - run: npm test
         if: ${{ inputs.run_checks == true }}
         working-directory: desktop
       - run: pwsh -NoProfile -File tools/verify-gg-setup.ps1

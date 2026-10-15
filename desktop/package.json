@@ -5,6 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
+    "dev:ui": "vite --host 127.0.0.1 --port 1421 --strictPort --open /ui.html",
+    "lint": "tsc --noEmit",
+    "test": "node --test tools/*.test.mjs",
     "build": "tsc --noEmit && vite build && node tools/verify-built-css.mjs",
     "tauri": "tauri"
   },

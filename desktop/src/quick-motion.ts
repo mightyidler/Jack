@@ -1,4 +1,5 @@
 import { cssTimeMs } from './motion-time';
+import { captureDividerOpacity, animateDividerOpacity } from './divider-motion';
 
 // One mounted surface and one geometry timeline, in a stable native viewport.
 // Native calls change only its input/paint region, never WebView2's buffer size.
@@ -182,6 +183,7 @@ export class QuickSurface {
 
   private async showPage(page:HTMLElement,animate:boolean) {
     const previous=this.page;
+    const dividerOpacity=captureDividerOpacity(previous);
     const focused=document.activeElement as HTMLElement | null;
     const focusId=previous?.contains(focused) ? focused?.id : undefined;
     const changed=!!previous && previous.dataset.viewKey!==page.dataset.viewKey;
@@ -211,6 +213,7 @@ export class QuickSurface {
       page.style.removeProperty('visibility');
       page.removeAttribute('aria-hidden');
       page.inert=false;
+      if(!this.reduced(animate))animateDividerOpacity(page,dividerOpacity);
       if(transition) {
         page.dataset.animating='true';previous!.dataset.animating='true';
         const animations: Animation[]=[];

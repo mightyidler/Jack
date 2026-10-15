@@ -282,6 +282,7 @@ pub fn is_closing(app: &tauri::AppHandle) -> bool {
         .lock()
         .is_ok_and(|inner| inner.closing)
 }
+#[cfg(debug_assertions)]
 pub fn inspect(app: &tauri::AppHandle) {
     if let Ok(mut inner) = app.state::<PopupState>().inner.lock() {
         inner.inspecting = true;

@@ -49,6 +49,9 @@ export async function mountTrayMenu(app:HTMLElement) {
       event.preventDefault();
       (event.key==='Home'?open:event.key==='End'?quit:document.activeElement===open?quit:open).focus();
     }
-    if(event.key==='F12'||(event.ctrlKey&&event.shiftKey&&event.key.toLowerCase()==='i')){event.preventDefault();void invoke('open_devtools');}
+    if(event.key==='F12'||(event.ctrlKey&&event.shiftKey&&event.key.toLowerCase()==='i')){
+      event.preventDefault();
+      if(import.meta.env.DEV)void invoke('open_devtools').catch(console.error);
+    }
   });
 }

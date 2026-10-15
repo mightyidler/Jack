@@ -23,3 +23,12 @@ if(!/transition:opacity (?:\.2s|200ms),transform (?:\.2s|200ms)/.test(toast[1]))
   throw new Error('Built CSS must preserve Bald toast transition timing.');
 }
 console.log('Built CSS: Bald toast transition 200ms and lifetime 3000ms preserved.');
+const dividerDuration=css.match(/--divider-fade-duration:([^;}]+)/)?.[1];
+if(cssTimeMs(dividerDuration??'',NaN)!==250) {
+  throw new Error('Built CSS divider fade must resolve to 250 milliseconds.');
+}
+const dividers=[...css.matchAll(/\.device-divider\.hidden\{([^}]+)\}/g)];
+if(!dividers.some(match=>/(?:^|;)opacity:0(?:;|$)/.test(match[1]))) {
+  throw new Error('Built CSS must hide device dividers using opacity.');
+}
+console.log('Built CSS: divider opacity fade 250ms preserved.');

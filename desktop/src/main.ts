@@ -25,14 +25,16 @@ import { setShortcutLabel } from './shortcut-motion';
 import { cssTimeMs } from './motion-time';
 import './rendering.css';
 import { showToast, updateSection } from './bald-updates';
+import { captureDividerOpacity, animateDividerOpacity } from './divider-motion';
+import './divider-motion.css';
 
 type Flow = 'render' | 'capture';
-type Theme = 'system' | 'dark' | 'light';
+export type Theme = 'system' | 'dark' | 'light';
 interface Group { id:string; display_name:string; sonar_channel?:OutputGroup|null; icon_asset_id?:string|null }
 interface TrayShortcut { enabled:boolean; key:string|null; modifiers:number }
 interface Settings { theme: Theme; language: string; launch_at_login: boolean; channel_separation_enabled: boolean; link_group_outputs: boolean; groups?: Group[]; tray_shortcut?:TrayShortcut }
 interface Endpoint { id: string; name: string; flow: Flow; form_factor: number | null; defaults: string[]; volume: {level: number; muted: boolean} | null }
-type Channel = 'game' | 'chat' | 'media' | 'aux' | 'microphone';
+export type Channel = 'game' | 'chat' | 'media' | 'aux' | 'microphone';
 type MixerChannel = Channel | 'master';
 // Backend capabilities do not define Jack's visible product controls.
 const outputGroups = ['game','chat','media'] as const;
@@ -46,9 +48,11 @@ interface SonarState {
   sources: {channel: Channel; endpoint_id: string}[];
 }
 interface AppRoute {process_id:number;stable_id:string|null;requested:Channel|null;origin:string;pending:boolean;icon_data_url?:string|null}
-interface ViewState { settings: Settings; audio: {endpoints: Endpoint[]; warnings: string[]}; separation_available: boolean; sonar: SonarState; app_routing?:AppRoute[]; routing_warnings?:string[] }
+export interface ViewState { settings: Settings; audio: {endpoints: Endpoint[]; warnings: string[]}; separation_available: boolean; sonar: SonarState; app_routing?:AppRoute[]; routing_warnings?:string[] }
 const native = isTauri();
 const params = new URLSearchParams(location.search);
+const interactivePreview = !native && import.meta.env.DEV && params.has('interactive');
+const controlsAvailable = native || interactivePreview;
 const quick = params.get('view') === 'tray';
 document.documentElement.classList.toggle('quick-view',quick);
 if (quick) document.documentElement.dataset.popupOpen=String(!native);
@@ -151,7 +155,7 @@ function theme() {
   document.documentElement.dataset.fastlaneTheme = document.documentElement.dataset.theme;
 }
 async function act(action: Record<string, unknown>) {
-  if (!native || busy) return;
+  if (!controlsAvailable || busy) return;
   revision++;
   const focusId = (document.activeElement as HTMLElement)?.id;
   busy = true; error = ''; updateDisabled();
@@ -162,17 +166,22 @@ async function act(action: Record<string, unknown>) {
       retry.querySelector('.retry-label')!.textContent=state?.settings.language==='en'?'Connecting…':'연결 중…';
     }
   }
-  try { state = await invoke<ViewState>('audio_action',{action}); }
-  catch (e) { error = String(e); showToast(error,7000); try { state = await invoke<ViewState>('audio_action',{action:{kind:'read'}}); } catch { /* preserve the original error */ } }
+  try {
+    if (interactivePreview && state) {
+      const { applyPreviewAction } = await import('./preview-actions');
+      state = applyPreviewAction(state,action,fixture);
+    } else state = await invoke<ViewState>('audio_action',{action});
+  }
+  catch (e) { error = String(e); showToast(error,7000); if (native) try { state = await invoke<ViewState>('audio_action',{action:{kind:'read'}}); } catch { /* preserve the original error */ } }
   finally { busy = false; render(); if (focusId) document.getElementById(focusId)?.focus(); }
 }
 function updateDisabled() { app.querySelectorAll<HTMLButtonElement | HTMLSelectElement>('[data-control]').forEach(el => {
   if (el.id === 'group-add') {
     // Busy actions are already rejected by act(); keep the button's paint stable.
-    el.setAttribute('aria-disabled',String(el.disabled || busy || !native));
-  } else el.disabled = busy || !native;
+    el.setAttribute('aria-disabled',String(el.disabled || busy || !controlsAvailable));
+  } else el.disabled = busy || !controlsAvailable;
 }); }
-function control<T extends HTMLButtonElement | HTMLSelectElement>(el: T) { el.dataset.control = ''; el.disabled = busy || !native; return el; }
+function control<T extends HTMLButtonElement | HTMLSelectElement>(el: T) { el.dataset.control = ''; el.disabled = busy || !controlsAvailable; return el; }
 function retryButton(action:()=>void,sonar=false) {
   const btn=control(button('','retry',action));
   btn.append(icon('Refresh',20),element('span','retry-label',t().retry));
@@ -200,6 +209,7 @@ function render() {
   const focused = (document.activeElement as HTMLElement)?.id;
   const oldFrame=app.querySelector<HTMLElement>('.window');
   const oldPanel = document.getElementById('panel');
+  const dividerOpacity=captureDividerOpacity(oldPanel);
   const scrollTop = oldPanel?.classList.contains(tab) ? oldPanel.scrollTop : 0;
   disposeScrollbars.forEach(dispose => dispose()); disposeScrollbars=[];
   theme(); const m = t(); let frame:HTMLElement = element('div','window');
@@ -282,6 +292,7 @@ function render() {
   slidingTabs.mount(tabs,pill);
   disposeScrollbars.push(mountScrollbar(content,frame,'main'));
   content.scrollTop = scrollTop;
+  animateDividerOpacity(content,dividerOpacity);
   if (focused) document.getElementById(focused)?.focus({preventScroll:true});
 }
 function renderSettings(content: HTMLElement) {
@@ -324,14 +335,14 @@ function shortcutLabel(shortcut:TrayShortcut,english:boolean) {
   return [...(shortcut.modifiers&2?['Ctrl']:[]),...(shortcut.modifiers&1?['Alt']:[]),...(shortcut.modifiers&4?['Shift']:[]),...(shortcut.modifiers&8?['Win']:[]),shortcut.key.replace(/^(Key|Digit|Numpad)/,'')].join(' + ');
 }
 async function recordShortcut(button:HTMLButtonElement) {
-  if(!native || busy || shortcutRecording)return;
+  if(!controlsAvailable || busy || shortcutRecording)return;
   shortcutRecording=true;shortcutCaptureReady=false;revision++;
   setShortcutLabel(button,state?.settings.language==='en'?'Press a key':'키를 누르세요',true);
   button.setAttribute('aria-live','polite');
   try {
-    await invoke('shortcut_recording',{recording:true});
+    if (native) await invoke('shortcut_recording',{recording:true});
     if(shortcutRecording)shortcutCaptureReady=true;
-    else await invoke('shortcut_recording',{recording:false});
+    else if (native) await invoke('shortcut_recording',{recording:false});
   } catch(reason) {shortcutRecording=false;error=String(reason);render();}
 }
 async function finishShortcutRecording(binding?:TrayShortcut) {
@@ -342,7 +353,7 @@ async function finishShortcutRecording(binding?:TrayShortcut) {
   if(capture)setShortcutLabel(capture,shortcutLabel(shortcut,state?.settings.language==='en'),false);
   try {
     if(binding)await act({kind:'tray_shortcut',...binding});
-    await invoke('shortcut_recording',{recording:false});
+    if (native) await invoke('shortcut_recording',{recording:false});
     if(!binding)render();
   } catch(reason){error=String(reason);render();}
 }
@@ -387,7 +398,13 @@ function deviceList(flow: Flow, heading = true) {
       if (micVolume) bindVolume(row,fill,{id:device.id,name:device.name,flow:'capture',form_factor:null,defaults:[],volume:{level:micVolume.volume,muted:micVolume.muted}},'microphone');
     }
     list.append(row);
-    if (i < devices.length - 1) { const divider = element('div','device-divider'); divider.classList.toggle('hidden',active || devices[i+1].id === selected); list.append(divider); }
+    if (i < devices.length - 1) {
+      const divider=element('div','device-divider');
+      divider.dataset.dividerKey=JSON.stringify([flow,device.id,devices[i+1].id]);
+      divider.setAttribute('aria-hidden','true');
+      divider.classList.toggle('hidden',active || devices[i+1].id === selected);
+      list.append(divider);
+    }
   }); section.append(list); return section;
 }
 function sonarConnection() {
@@ -439,14 +456,29 @@ function sonarChannels(showApplications = true) {
   if (showApplications) section.append(sectionLabel(english ? 'Audio groups' : '오디오 그룹'));
   const labels = groupLabels();
   const groups = configuredGroups();
-  const appGroups = groupApplications(sonar.applications,state!.app_routing ?? []);
+  const routingByProcess = new Map<number,AppRoute>();
+  const applicationsByChannel = new Map<string,ApplicationGroup[]>();
+  if (showApplications) {
+    const routing = state!.app_routing ?? [];
+    for (const entry of routing) routingByProcess.set(entry.process_id,entry);
+    for (const application of groupApplications(sonar.applications,routing)) {
+      const channel = application.session.route;
+      const applications = applicationsByChannel.get(channel) ?? [];
+      applications.push(application);
+      applicationsByChannel.set(channel,applications);
+    }
+  }
   for (const group of groups) {
     const channel = group.channel;
     const sourceAvailable = sonar.sources.some(s => s.channel === channel);
     const volume = sonar.volumes.find(v => v.channel === channel);
     const route = sonar.routes.find(r => r.channel === channel);
+    const outputAvailable=sourceAvailable && !!volume && !!route && sonar.devices.some(device=>device.id===route.device_id && device.role==='playback' && device.enabled);
+    const pickerAvailable=sourceAvailable && !!route && sonar.devices.some(device=>device.role==='playback' && device.enabled);
+    const level=outputAvailable?volume!.volume:0;
     const card = element('div','card sonar-channel');
     card.dataset.channel=channel;card.dataset.dropDisabled=String(!sourceAvailable);
+    card.dataset.outputUnavailable=String(!outputAvailable);
     const head = element('div','sonar-channel-head');
     const groupIcon = {game:'Gaming',chat:'Chat',media:'Media',aux:'Puzzle'}[channel];
     const title=element('div','sonar-channel-title'); title.append(icon(groupIcon,quick ? 20 : 24),element('h2','item-title',labels[channel])); head.append(title);
@@ -455,20 +487,20 @@ function sonarChannels(showApplications = true) {
       remove.id = `group-remove-${group.id}`; remove.setAttribute('aria-label',english ? `Delete ${labels[channel]} group` : `${labels[channel]} 그룹 삭제`); remove.append(icon('X',16)); head.append(remove);
     }
     card.append(head);
-    if (volume) {
+    {
       const row = control(button('','device-row selected',() => {})); row.id = `sonar-volume-${channel}`;
-      row.disabled ||= !sourceAvailable;
+      row.disabled ||= !outputAvailable;
       const name = route?.device_name ?? (english ? 'Output disconnected' : '출력 장치 연결 해제');
-      const fill = element('span','volume-fill'); fill.style.width = `${volume.volume * 100}%`;
-      row.append(fill,playbackIcon(name),element('span','device-name',deviceLabel(name)),element('span','sonar-percent',`${Math.round(volume.volume * 100)}%`));
-      if (!native && import.meta.env.DEV && params.has('live-volume')) row.disabled = !sourceAvailable;
-      bindVolume(row,fill,{id:channel,name:labels[channel],flow:'render',form_factor:null,defaults:[],volume:{level:volume.volume,muted:volume.muted}},channel);
+      const fill = element('span','volume-fill'); fill.style.width = `${level * 100}%`;
+      row.append(fill,playbackIcon(name),element('span','device-name',deviceLabel(name)),element('span','sonar-percent',`${Math.round(level * 100)}%`));
+      if (!native && import.meta.env.DEV && params.has('live-volume')) row.disabled = !outputAvailable;
+      bindVolume(row,fill,{id:channel,name:labels[channel],flow:'render',form_factor:null,defaults:[],volume:{level,muted:volume?.muted ?? false}},channel);
       const deviceControl=element('div','sonar-device-control');deviceControl.append(row);card.append(deviceControl);
-      if (route) {
+      {
         const wrapper = element('div','sonar-device-picker');
         if (quick) {
           const open = button('','sonar-output-open',() => { quickOutputGroup = channel; renderQuick(); document.getElementById('quick-output-back')?.focus(); });
-          open.disabled = busy || !sourceAvailable;
+          open.disabled = busy || !pickerAvailable;
           open.id = `sonar-output-${channel}`; open.setAttribute('aria-label',`${labels[channel]} ${t().outputs}`); open.append(chevron('right',20)); wrapper.append(open);
         } else {
           let openedBeforePointer = false;
@@ -477,7 +509,7 @@ function sonarChannels(showApplications = true) {
             openOutputMenu(channel,open);
           });
           open.addEventListener('pointerdown',() => openedBeforePointer = open.getAttribute('aria-expanded') === 'true',{capture:true});
-          open.disabled = busy || !sourceAvailable; open.id = `sonar-output-${channel}`;
+          open.disabled = busy || !pickerAvailable; open.id = `sonar-output-${channel}`;
           open.setAttribute('aria-label',`${labels[channel]} ${t().outputs}`); open.setAttribute('aria-haspopup','dialog'); open.setAttribute('aria-expanded','false');
           open.append(chevron('down',24)); wrapper.append(open);
         }
@@ -487,9 +519,9 @@ function sonarChannels(showApplications = true) {
     }
     if (showApplications) {
       const applications = element('div','sonar-app-list');
-      for (const application of appGroups.filter(a => a.session.route === channel)) {
+      for (const application of applicationsByChannel.get(channel) ?? []) {
         if (applications.childElementCount) applications.append(element('div','sonar-app-divider'));
-        applications.append(sonarApplication(application,labels));
+        applications.append(sonarApplication(application,labels,routingByProcess));
       }
       card.append(applications);
     }
@@ -498,7 +530,7 @@ function sonarChannels(showApplications = true) {
   if (showApplications) {
     const add = control(button('','sonar-group-add',() => void act({kind:'add_group'}))); add.id = 'group-add';
     add.append(icon('Plus'),element('span','',english ? 'Add group' : '그룹 추가'));
-    add.disabled = !native || groups.length >= 4;
+    add.disabled = !controlsAvailable || groups.length >= 4;
     add.setAttribute('aria-disabled',String(add.disabled || busy));
     add.title = groups.length >= 4 ? (english ? 'Maximum four groups' : '최대 4개 그룹') : '';
     section.append(add);
@@ -581,15 +613,19 @@ function openOutputMenu(channel: OutputGroup, trigger: HTMLButtonElement) {
   });
   (menu.querySelector<HTMLButtonElement>('.route-selected:not(:disabled)') ?? menu).focus({preventScroll:true});
 }
-function sonarApplication(application: ApplicationGroup, labels: Record<MixerChannel,string>) {
+function sonarApplication(application: ApplicationGroup, labels: Record<MixerChannel,string>, routingByProcess: ReadonlyMap<number,AppRoute>) {
   const session = application.session;
   const row = element('div','sonar-app');
   const name = session.display_name || session.process_name;
-  const meta=(state!.app_routing ?? []).find(a=>a.process_id===session.process_id);
+  const meta=routingByProcess.get(session.process_id);
   const info=element('div','sonar-app-info');info.append(element('span','device-name',name));
   info.title = `${session.process_name} (${application.process_ids.join(', ')})`;
   const programIcon=element('img','sonar-app-icon');programIcon.alt='';programIcon.width=programIcon.height=24;programIcon.draggable=false;
-  const iconSource=application.process_ids.map(pid => state!.app_routing?.find(app => app.process_id===pid)?.icon_data_url).find(Boolean);
+  let iconSource: string | null | undefined;
+  for (const pid of application.process_ids) {
+    iconSource=routingByProcess.get(pid)?.icon_data_url;
+    if (iconSource) break;
+  }
   if (iconSource) programIcon.src=iconSource; else programIcon.style.visibility='hidden';
   const handle=element('span','sonar-app-handle');handle.setAttribute('aria-hidden','true');handle.append(icon('reorder'));
   row.append(programIcon,info,handle);row.id=`sonar-app-${session.process_id}`;row.tabIndex=0;row.role='button';
@@ -602,13 +638,14 @@ function sonarApplication(application: ApplicationGroup, labels: Record<MixerCha
       // Preview gesture/model only: no audio policy or GG requests in a browser.
       state!.sonar.applications.filter(member => application.process_ids.includes(member.process_id)).forEach(member => member.route=channel);
       state!.app_routing?.filter(member => application.process_ids.includes(member.process_id)).forEach(member => {member.requested=channel as Channel;member.origin='user';});
+      render();
       return Promise.resolve();
     }
     return act({kind:'assign_application',process_id:session.process_id,process_name:session.process_name,channel,automatic:false});
   };
   bindAppDrag(row,{canStart:() => movable && !busy && !dragging && (native || import.meta.env.DEV),onStart:cancel => {dragging=true;cancelDrag=cancel;},onFinish:() => {dragging=false;cancelDrag=null;render();},onDrop:moveTo});
   row.addEventListener('keydown',event => {
-    if (!event.shiftKey || !['ArrowUp','ArrowDown'].includes(event.key) || !movable || busy || dragging || !native) return;
+    if (!event.shiftKey || !['ArrowUp','ArrowDown'].includes(event.key) || !movable || busy || dragging || !controlsAvailable) return;
     const groups=configuredGroups().filter(group => state!.sonar.sources.some(source => source.channel===group.channel));
     const index=groups.findIndex(group => group.channel===session.route);const target=groups[index+(event.key==='ArrowDown'?1:-1)];
     if (target) {event.preventDefault();void moveTo(target.channel);}
@@ -713,7 +750,7 @@ function bindVolume(row: HTMLButtonElement, fill: HTMLElement, device: Endpoint,
   const volume=device.volume!;
   let next=volume.level; let pointer:number|null=null; let stream:LiveVolume|null=null;
   let bounds:DOMRect|null=null; let held=false; let releasing=false; let epoch=0;
-  const available=()=>(native || (import.meta.env.DEV && params.has('live-volume'))) && !busy && (!dragging || releasing);
+  const available=()=>!row.disabled && (controlsAvailable || (import.meta.env.DEV && params.has('live-volume'))) && !busy && (!dragging || releasing);
   row.role='slider'; row.setAttribute('aria-label',`${deviceLabel(device.name)} ${t().volume}`);
   row.setAttribute('aria-valuemin','0');row.setAttribute('aria-valuemax','100');row.setAttribute('aria-valuenow',String(Math.round(next*100)));
   let percent=row.querySelector<HTMLElement>('.sonar-percent');
@@ -723,7 +760,7 @@ function bindVolume(row: HTMLButtonElement, fill: HTMLElement, device: Endpoint,
   const clip=element('span','volume-surface-clip');clip.setAttribute('aria-hidden','true');
   const surface=element('span','volume-surface');surface.append(fill);clip.append(surface);row.append(clip,content);
   const previous=volumeMotions.get(channel);
-  const initial=previous?.snapshot();previous?.dispose();
+  const initial=row.disabled?undefined:previous?.snapshot();previous?.dispose();
   let paintedPercent=-1;
   const motion=new VolumeMotion(fill,surface,next,level=>{
     row.classList.toggle('volume-changing',Math.abs(level-next)>.0002);
@@ -838,8 +875,18 @@ function fixture(): ViewState {
   if (params.has('grouped-apps')) preview.app_routing = preview.sonar.applications.map(session => ({process_id:session.process_id,stable_id:`path:preview/${session.process_name}`,requested:session.route as Channel,origin:'automatic',pending:false}));
   if (params.get('theme') === 'light' || params.get('theme') === 'dark') preview.settings.theme = params.get('theme') as Theme;
   if (params.get('lang') === 'en') preview.settings.language = 'en';
-  if (params.has('long')) preview.audio.endpoints.forEach(e => e.name += ' — USB High Definition Audio Device with a very long device name');
-  if (params.has('empty')) preview.audio.endpoints = [];
+  if (params.has('long')) {
+    const suffix=' — USB High Definition Audio Device with a very long device name';
+    preview.audio.endpoints.forEach(device=>device.name+=suffix);
+    preview.sonar.devices.forEach(device=>device.name+=suffix);
+    preview.sonar.routes.forEach(route=>route.device_name=(route.device_name ?? '')+suffix);
+  }
+  if (params.has('empty')) {
+    preview.audio.endpoints=[];preview.sonar.devices=[];preview.sonar.routes=[];preview.sonar.applications=[];
+  }
+  if (params.has('disconnected')) {
+    preview.separation_available=false;preview.sonar.connection='disconnected';preview.sonar.mode=null;
+  }
   return preview;
 }
 if (params.has('tray-menu')) {
@@ -863,6 +910,8 @@ if (params.has('tray-menu')) {
     if(!quick)void listen<TrayShortcut>('jack-shortcut-key',event=>{
       if(shortcutRecording&&shortcutCaptureReady)void finishShortcutRecording(event.payload);
     });
+  }
+  if (controlsAvailable) {
     if(!quick) {
       document.addEventListener('keydown',event=>{
         if(!shortcutRecording)return;
@@ -878,6 +927,8 @@ if (params.has('tray-menu')) {
         if(shortcutRecording && !(event.target instanceof Element && event.target.closest('#tray-shortcut-key')))void finishShortcutRecording();
       },{capture:true});
     }
+  }
+  if (native) {
     if(!quick)document.addEventListener('mousedown',event=>{
       if(event.button!==0 || windowDragging)return;
       const target=event.target;
@@ -906,7 +957,9 @@ if (params.has('tray-menu')) {
   matchMedia('(prefers-color-scheme: light)').addEventListener('change',theme);
   document.addEventListener('keydown',e => {
     if (native && (e.key === 'F12' || (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'i'))) {
-      e.preventDefault(); void invoke('open_devtools').catch(reason => console.error(reason)); return;
+      e.preventDefault();
+      if (import.meta.env.DEV) void invoke('open_devtools').catch(reason => console.error(reason));
+      return;
     }
     if (e.key !== 'Escape') return;
     if (cancelDrag) { e.preventDefault(); cancelDrag(); return; }

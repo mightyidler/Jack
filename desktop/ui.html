@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Jack UI 테스트</title>
+  </head>
+  <body>
+    <aside>
+      <h1>Jack UI 테스트</h1>
+      <p>샘플 데이터로 화면과 동작을 확인합니다. 변경 사항은 이 미리보기에만 적용되며 새로고침하면 초기화됩니다.</p>
+      <form id="preview-options">
+        <label>화면<select name="screen"><option value="render">사운드 출력</option><option value="capture">마이크 입력</option><option value="settings">설정</option><option value="tray">트레이 빠른 제어</option></select></label>
+        <label>테마<select name="theme"><option value="dark">다크</option><option value="light">라이트</option><option value="system">시스템</option></select></label>
+        <label>언어<select name="lang"><option value="ko">한국어</option><option value="en">English</option></select></label>
+        <label>상태<select name="scenario"><option value="connected">연결됨</option><option value="disconnected">연결 끊김</option><option value="empty">장치 없음</option><option value="long">긴 장치 이름</option><option value="missing-source">사용할 수 없는 보조 그룹</option></select></label>
+        <label>오디오 그룹<select name="groups"><option value="3">3개</option><option value="4">4개</option></select></label>
+        <label class="checkbox"><input type="checkbox" name="expanded">트레이 마이크 펼치기</label>
+        <button type="button" id="reload-preview">미리보기 초기화</button>
+      </form>
+      <a id="open-preview" target="_blank" rel="noopener">화면만 새 탭에서 열기 ↗</a>
+      <p class="hint">볼륨, 출력·마이크 장치, 앱 드래그, 그룹 추가·삭제, 설정 및 단축키를 테스트할 수 있습니다. 실제 오디오 제어·업데이트·시작 프로그램 등록은 네이티브 앱에서 확인하세요.</p>
+    </aside>
+    <main><iframe id="preview" title="Jack 앱 미리보기"></iframe></main>
+    <script type="module" src="/src/ui-preview.ts"></script>
+  </body>
+</html>

@@ -1,6 +1,7 @@
 {
   "source": "PretendardVariable.woff2",
-  "license": "OFL.txt",
+  "license": "../public/assets/fonts/OFL.txt",
+  "output_directory": "../public/assets/fonts",
   "method": "fontTools.varLib.instancer.instantiateVariableFont; pin wght; updateFontNames=True",
   "faces": [
     {

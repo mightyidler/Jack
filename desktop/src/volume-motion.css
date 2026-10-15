@@ -18,9 +18,9 @@
 .device-row:is(.adjusting,.volume-changing) .volume-content .device-name { margin-right:42px; }
 .volume-content .check { transition:opacity 150ms ease-in-out,filter 150ms ease-in-out; }
 .device-row:is(.adjusting,.volume-changing) .volume-content .check { opacity:0; filter:blur(2px); }
-.quick-panel .sonar-percent { position:relative; right:auto; opacity:1; filter:none; transform:none; font-size:15px; line-height:20px; font-weight:400; letter-spacing:-.3px; }
-.quick-panel .volume-content .device-name { margin-right:0; }
-.quick-panel .device-row:is(.adjusting,.volume-changing) .volume-content .check { opacity:1; filter:none; }
+/* Tray output channels keep a persistent percentage; input devices use the app's check/percentage swap. */
+.quick-panel .sonar-device-control .sonar-percent { position:relative; right:auto; opacity:1; filter:none; transform:none; font-size:15px; line-height:20px; font-weight:400; letter-spacing:-.3px; }
+.quick-panel .sonar-device-control .volume-content .device-name { margin-right:0; }
 @media(prefers-reduced-motion:reduce) {
   .device-row[role=slider] .volume-fill,.sonar-percent,.volume-content .device-name,.volume-content .check { transition:none!important; }
 }

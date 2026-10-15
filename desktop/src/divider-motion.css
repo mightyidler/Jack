@@ -1,0 +1,13 @@
+/* Transitions.dev opacity lane: no movement, blur or layout changes. */
+:root {
+  --divider-fade-duration:250ms;
+  --divider-fade-ease:ease-in-out;
+}
+.device-divider {
+  opacity:1;
+  transition:opacity var(--divider-fade-duration) var(--divider-fade-ease);
+}
+.device-divider.hidden { opacity:0; }
+@media(prefers-reduced-motion:reduce) {
+  .device-divider { transition:none!important; }
+}

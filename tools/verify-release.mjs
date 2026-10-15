@@ -15,5 +15,6 @@ assert.ok(config.plugins.updater.pubkey&&!config.plugins.updater.pubkey.includes
 assert.match(Buffer.from(config.plugins.updater.pubkey,'base64').toString('utf8'),/^untrusted comment: minisign public key:/);
 assert.equal(config.plugins.updater.endpoints[0],'https://github.com/mightyidler/Jack/releases/latest/download/latest.json');
 assert.equal(config.bundle.windows.nsis.installerHooks,'windows/hooks.nsh');
-for(const file of ['LICENSE','THIRD_PARTY_NOTICES.md','desktop/public/assets/LICENSE-sonarctl.txt','desktop/public/assets/LICENSE-sds.txt','desktop/public/assets/fonts/OFL.txt'])assert.ok(readFileSync(file).length);
+for(const file of ['LICENSE','THIRD_PARTY_NOTICES.md','THIRD_PARTY_LICENSES.txt','desktop/public/assets/LICENSE-sonarctl.txt','desktop/public/assets/LICENSE-sds.txt','desktop/public/assets/fonts/OFL.txt'])assert.ok(readFileSync(file).length);
+assert.equal(config.bundle.resources['../../THIRD_PARTY_LICENSES.txt'],'THIRD_PARTY_LICENSES.txt');
 console.log(`Jack ${config.version}: versions, updater key, endpoint, installer and licenses verified.`);

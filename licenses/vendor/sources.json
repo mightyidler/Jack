@@ -1,0 +1,34 @@
+[
+  {
+    "url": "https://raw.githubusercontent.com/dropbox/rust-alloc-no-stdlib/0a81fd6928ea3b33c8cd484aa4575d50ffb98012/LICENSE",
+    "name": "alloc-stdlib-0.3.0-BSD.txt"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/knurling-rs/defmt/4a8cdb44891ed57b8ff5a023b6bec7137c48708f/LICENSE-MIT",
+    "name": "defmt-parser-1.0.0-MIT.txt"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/knurling-rs/defmt/4a8cdb44891ed57b8ff5a023b6bec7137c48708f/LICENSE-APACHE",
+    "name": "defmt-parser-1.0.0-APACHE.txt"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/tauri-apps/tauri/59b63ab500da9859f12d8888c3298bc29bba0b92/LICENSE-MIT",
+    "name": "tauri-plugin-2.7.2-MIT.txt"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/tauri-apps/tauri/59b63ab500da9859f12d8888c3298bc29bba0b92/LICENSE-APACHE-2.0",
+    "name": "tauri-plugin-2.7.2-APACHE.txt"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/wravery/webview2-rs/edc2caf886175ccaebe86078c9cfe1ae2a187328/LICENSE",
+    "name": "webview2-com-0.39.1-MIT.txt"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/wravery/webview2-rs/dffa41a8a46d3f5565eefbff2de57d38d399f158/LICENSE",
+    "name": "webview2-com-macros-0.8.1-MIT.txt"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/spdx/license-list-data/main/text/MPL-2.0.txt",
+    "name": "selectors-0.38.0-MPL.txt"
+  }
+]

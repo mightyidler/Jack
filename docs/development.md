@@ -11,6 +11,7 @@ npm run tauri -- dev
 소스 검사:
 
 ```powershell
+node tools/collect-licenses.mjs --check
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
@@ -19,6 +20,8 @@ npm run build
 ```
 
 오디오·화면을 조작하는 진단 도구는 일반 검사에서 실행하지 않는다.
+
+의존성을 바꾸면 `node tools/collect-licenses.mjs`로 원문 고지를 갱신한다. 레지스트리 패키지에 없는 원문은 `licenses/vendor/sources.json`의 출처와 함께 보존한다.
 
 설치 파일 빌드:
 

@@ -5,6 +5,6 @@
 - Pretendard: Copyright 2021 The Pretendard Project Authors. SIL Open Font License 1.1. 라이선스: `desktop/public/assets/fonts/OFL.txt`.
 - Figma Simple Design System: Copyright 2024 Figma. MIT. 일부 아이콘을 사용·수정했다. 라이선스: `desktop/public/assets/LICENSE-sds.txt`.
 
-Rust·JavaScript 의존성에는 각 프로젝트의 라이선스가 적용된다. 버전은 `Cargo.lock`과 `desktop/package-lock.json`에 기록한다.
+Rust·JavaScript 의존성의 라이선스 원문은 설치 폴더의 `THIRD_PARTY_LICENSES.txt`에 제공한다. 버전은 `Cargo.lock`과 `desktop/package-lock.json`에 기록한다.
 
 SteelSeries GG는 Jack에 포함되지 않는 별도 소프트웨어다. 설치·사용에는 해당 제공자의 약관이 적용된다. Jack은 SteelSeries의 공식 제품이 아니며, 제휴·보증을 의미하지 않는다. SteelSeries와 Sonar 명칭은 연동 대상을 설명하기 위해 사용한다.

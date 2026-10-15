@@ -6,7 +6,7 @@ Windows 11용 오디오 제어 앱입니다. SteelSeries GG의 Sonar Classic에 
 
 1. [Releases](https://github.com/mightyidler/Jack/releases)에서 설치 파일을 받습니다.
 2. GG가 없으면 안내에 동의한 뒤 공식 최신 GG를 설치합니다. 이미 설치되어 있으면 기존 설치를 사용하며, 구버전은 동의 후 업데이트할 수 있습니다.
-3. GG에서 Sonar를 켜고 Classic 모드와 실제 출력 장치·마이크를 설정합니다. Jack 설정에서 다시 연결할 수 있습니다.
+3. GG에서 Sonar를 켜고 Classic 모드와 실제 출력 장치·마이크를 설정합니다. Jack의 연결 안내에서 다시 시도할 수 있습니다.
 
 GG 설치를 거절하면 Jack 신규 설치가 중단됩니다. 인터넷 연결과 GG 설치 시 관리자 승인이 필요할 수 있습니다. GG가 요청하면 재부팅 후 설정을 이어가세요. GG 설치 파일과 드라이버는 Jack에 포함하지 않습니다.
 

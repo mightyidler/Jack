@@ -21,3 +21,6 @@ image = { version = "0.25", default-features = false, features = ["png", "ico"] 
 base64 = "0.22"
 webview2-com = "0.39.1"
 tauri-plugin-updater = "2"
+
+[dev-dependencies]
+minisign-verify = "0.3"

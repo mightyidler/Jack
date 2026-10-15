@@ -3,6 +3,10 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag (for example v0.1.0)
+        required: true
 permissions:
   contents: write
 concurrency:
@@ -11,8 +15,12 @@ concurrency:
 jobs:
   release:
     runs-on: windows-latest
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -37,10 +45,17 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: desktop
-          tagName: ${{ github.ref_name }}
-          releaseName: Jack ${{ github.ref_name }}
-          releaseBody: 'Windows 11 x64용 Jack입니다. SteelSeries GG / Sonar Classic이 필요합니다. 설치·제한은 README를 참고하세요.'
+          tagName: ${{ env.RELEASE_TAG }}
+          releaseName: Jack ${{ env.RELEASE_TAG }}
+          releaseBody: 'Windows 11 x64용 Jack 배포 후보입니다. SteelSeries GG / Sonar Classic이 필요합니다. 설치·업데이트의 실제 PC 확인은 진행 중입니다. 설치 조건과 제한은 README를 참고하세요.'
           releaseDraft: true
           prerelease: false
           includeUpdaterJson: true
           args: --bundles nsis
+      - name: Verify built installer signature and tamper rejection
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem target/release/bundle/nsis/*_x64-setup.exe
+          if (@($installer).Count -ne 1) { throw 'Expected exactly one installer' }
+          cargo run -p jack-desktop --example verify-update -- $installer.FullName
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

@@ -1,12 +1,14 @@
 # 배포 상태
 
 - 공개 저장소: https://github.com/mightyidler/Jack
-- 0.1.6 배포 준비(2026-10-16): 버전·Cargo/npm lock 동기화, 기존 0.1.4·0.1.5 공개 키·앱 ID·설치 모드 유지 확인. Rust 125개 테스트, 프런트엔드 17개 테스트, 배포 회귀 4개 테스트, fmt/Clippy/TypeScript/프로덕션 CSS/라이선스 검사 통과. 실제 오디오를 조작하는 테스트는 실행하지 않았다.
-- 0.1.5 장애 원인: GitHub 빌드는 성공했지만 릴리즈가 초안으로 남았다. 인증 없는 릴리즈 API와 앱의 `releases/latest/download/latest.json`은 0.1.4를 반환했고, 설치된 0.1.5는 새 버전을 발견할 수 없었다. 사용자는 직접 다시 설치했다. CI에 업로드 파일 재검증·정식 공개·Latest 지정·익명 업데이트 경로 검증을 추가했다.
+- 0.1.6 공개 완료(2026-10-16): 버전·Cargo/npm lock 동기화, 기존 0.1.4·0.1.5 공개 키·앱 ID·설치 모드 유지 확인. Rust 125개 테스트, 프런트엔드 17개 테스트, 배포 회귀 4개 테스트, fmt/Clippy/TypeScript/프로덕션 CSS/라이선스 검사 통과. 실제 오디오를 조작하는 테스트는 실행하지 않았다.
+- 0.1.5 장애 원인: GitHub 빌드는 성공했지만 릴리즈가 초안으로 남았다. 인증 없는 릴리즈 API와 앱의 `releases/latest/download/latest.json`은 0.1.4를 반환해 기존 0.1.4에서 0.1.5를 발견할 수 없었다. 사용자는 직접 다시 설치했다. CI에 업로드 파일 재검증·정식 공개·Latest 지정·익명 업데이트 경로 검증을 추가했다.
 - 0.1.5 이전 실패 로그도 대조했다. `38710658446`은 태그 v0.1.5와 앱 설정 0.1.4의 불일치, `38711681362`·`38711748554`는 Cargo.lock 불일치로 라이선스 검사에서 중단됐다. 0.1.6은 Cargo/npm 버전과 잠금 파일을 함께 갱신하고 `--locked` 검사·빌드를 필수 실행한다.
 - 실제 설치된 `%LOCALAPPDATA%/Jack/jack-desktop.exe`의 제품 버전은 0.1.5이며, 동일한 업데이트 공개 키와 공개 endpoint가 바이너리에 포함된 것을 확인했다. 실제 앱 내 설치·재시작은 별도 확인이다.
 - 0.1.6 서명 빌드 후 공개 전 검사에서 Tauri Action의 GitHub API asset URL을 발견해 공개를 차단했다. 설치 파일 ID와 일치하는 API URL만 정식 공개 다운로드 주소로 변환하도록 수정했다. 서명된 설치 파일은 그대로 유지하고 재다운로드한 manifest·서명·변조 거부·기존 버전 키 호환 검사를 로컬에서 통과했다. 설치 파일 SHA256: `1778c93c5c4608fd16c15d73a7011620d4c07df63d991fbd85f38b199ba9b0a2`.
-- 공개 릴리스: https://github.com/mightyidler/Jack/releases/tag/v0.1.4 (2026-10-15). 설치 파일·업데이트 서명·latest.json을 제공한다. 공개 설치 파일 주소와 최신 업데이트 버전 반영을 확인했다.
+- 공개 릴리스: https://github.com/mightyidler/Jack/releases/tag/v0.1.6 (2026-10-16). 설치 파일·업데이트 서명·latest.json을 제공하며 Latest로 지정했다. 공개 API, 인증 없는 앱 endpoint와 설치 파일·서명 다운로드를 GitHub runner와 현재 PC에서 모두 확인했다.
+- 배포 작업 https://github.com/mightyidler/Jack/actions/runs/38821572155 성공. 앱 태그 커밋은 `d8ed888bb8d3e0a040867cbe89b87584a5ac56f1`이며 서명 빌드는 `38819708719`에서 완료됐다. 후속 배포는 앱·의존성·툴체인·라이선스 소스가 태그와 동일함을 확인한 뒤 메타데이터만 수정하고 공개했다.
+- 현재 PC에서 창·오디오 초기화·설치를 실행하지 않는 별도 Tauri probe에 현재 버전 0.1.5를 지정했다. 앱과 같은 `tauri-plugin-updater 2.14.0`이 공개 endpoint에서 0.1.6을 발견하고 8,290,974바이트 설치 파일을 다운로드해 서명 검증을 통과했다. 실제 설치된 앱의 버튼 조작·설치·재시작·오디오는 미확인으로 남긴다. 기록은 `artifacts/distribution/v0.1.6-verification.json`과 관련 로그에 보존했다.
 - 기존 GG 설치를 재사용한다. 공식 최신 주소는 https://steelseries.com/gg/downloads/gg/latest/windows 이다.
 - 공식 최신 GG 121.0.0의 제품 정보와 유효한 GN Hearing A/S 서명을 확인했다(2026-10-15).
 - 사용자 확인: 기존 GG로 설치·연결·출력·마이크 정상. 0.1.1 시작 실행 스위치·Bald 업데이트 행·토스트 정상.

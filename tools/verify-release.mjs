@@ -118,7 +118,10 @@ async function main() {
   assert.ok(directory, 'An asset directory is required');
   if (mode === '--assets') verifyAssets(directory, version);
   else if (mode === '--draft') {
-    const release = JSON.parse(execFileSync('gh', ['api', `repos/${repository}/releases/tags/v${version}`], {encoding: 'utf8'}));
+    // GitHub's release-by-tag endpoint excludes drafts, including for owners.
+    const releases = JSON.parse(execFileSync('gh', ['api', '--paginate', '--slurp', `repos/${repository}/releases?per_page=100`], {encoding: 'utf8'})).flat();
+    const release = releases.find(release => release.tag_name === `v${version}`);
+    assert.ok(release, `Draft release v${version} was not found`);
     validateRelease(release, version, false);
     verifyAssets(directory, version);
   }

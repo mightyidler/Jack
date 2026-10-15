@@ -27,6 +27,28 @@ fn discovery_rejects_external_hosts_credentials_and_alternate_loopback() {
 }
 
 #[test]
+fn explicit_retry_bypasses_old_backoff_and_restarts_short_startup_retry() {
+    let mut service = Service::new().unwrap();
+    service.state.connection = "waiting".into();
+    service.backoff = Duration::from_secs(30);
+    service.next_retry = Instant::now() + Duration::from_secs(30);
+    // This path is guaranteed not to be a file. Never discover the user's GG.
+    let options = DiscoveryOptions {
+        core_props: Some(std::env::temp_dir()),
+    };
+    assert_eq!(
+        service.refresh_with_options(false, &options).connection,
+        "waiting"
+    );
+    assert!(service.state.message.is_none());
+    let state = service.refresh_with_options(true, &options);
+    assert_eq!(state.connection, "disconnected");
+    assert!(state.message.is_some());
+    assert!(service.next_retry <= Instant::now() + Duration::from_secs(1));
+    assert_eq!(service.backoff, Duration::from_secs(2));
+}
+
+#[test]
 fn duplicate_virtual_targets_are_not_guessed() {
     let payload = json!([{"deviceId":"one","role":"game","dataFlow":"render"},{"deviceId":"two","role":"game","dataFlow":"render"}]);
     assert!(parse_application_routing(&payload).is_err());

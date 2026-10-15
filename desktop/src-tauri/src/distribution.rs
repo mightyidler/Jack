@@ -52,6 +52,7 @@ pub enum GgOperation {
     Latest,
     Install,
     Open,
+    Start,
 }
 
 fn run_gg(operation: GgOperation, consent: bool) -> Result<serde_json::Value, String> {
@@ -87,6 +88,7 @@ fn run_gg(operation: GgOperation, consent: bool) -> Result<serde_json::Value, St
                 GgOperation::Latest => "Latest",
                 GgOperation::Install => "Install",
                 GgOperation::Open => "Open",
+                GgOperation::Start => "Start",
             });
         if consent {
             command.arg("-Consent");
@@ -100,6 +102,24 @@ fn run_gg(operation: GgOperation, consent: bool) -> Result<serde_json::Value, St
     let _ = std::fs::remove_file(path);
     let _ = std::fs::remove_dir(folder);
     result
+}
+
+/// Only an explicit Retry starts an existing GG installation. Background reads
+/// keep reconnecting without launching programs or reinstalling dependencies.
+pub async fn start_gg_for_retry(app: tauri::AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<State>();
+        if state.updating.load(Ordering::Acquire) {
+            return Err("Jack is preparing an update".into());
+        }
+        let _guard = state
+            .operation
+            .try_lock()
+            .map_err(|_| "Another setup operation is running")?;
+        run_gg(GgOperation::Start, false).map(|_| ())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]

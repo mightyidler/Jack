@@ -83,6 +83,9 @@ fn ui_ready(
 
 #[tauri::command]
 async fn audio_action(app: tauri::AppHandle, action: Action) -> Result<ViewState, String> {
+    if matches!(action, Action::SonarRetry) {
+        distribution::start_gg_for_retry(app.clone()).await?;
+    }
     let preference_change = matches!(
         action,
         Action::Preferences { .. } | Action::TrayShortcut { .. } | Action::Reset

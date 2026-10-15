@@ -130,16 +130,20 @@ impl Service {
         self.backoff = (self.backoff * 2).min(Duration::from_secs(30));
     }
     pub fn refresh(&mut self, force: bool) -> State {
+        self.refresh_with_options(force, &DiscoveryOptions::resolve(None))
+    }
+    fn refresh_with_options(&mut self, force: bool, options: &DiscoveryOptions) -> State {
         if force {
             self.client = None;
             self.next_retry = Instant::now();
+            self.backoff = Duration::from_secs(1);
         }
         if self.client.is_none() && Instant::now() < self.next_retry {
             return self.state.clone();
         }
         let result = self.runtime.block_on(async {
             if self.client.is_none() {
-                self.client = Some(SonarClient::discover(&DiscoveryOptions::resolve(None)).await?);
+                self.client = Some(SonarClient::discover(options).await?);
             }
             read_state(self.client.as_ref().expect("discovered")).await
         });

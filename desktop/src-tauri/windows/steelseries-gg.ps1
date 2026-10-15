@@ -1,7 +1,7 @@
 ﻿# Shared by the installer and Jack. Never changes audio settings or Windows defaults.
 [CmdletBinding()]
 param(
-    [ValidateSet('Inspect', 'Latest', 'Install', 'Open', 'EnsureInstalled', 'RequireInstalled', 'StopJack')]
+    [ValidateSet('Inspect', 'Latest', 'Install', 'Open', 'Start', 'EnsureInstalled', 'RequireInstalled', 'StopJack')]
     [string]$Mode = 'Inspect',
     [switch]$Consent,
     [switch]$Korean,
@@ -115,6 +115,17 @@ function Assert-SteelSeriesSignature([string]$Path) {
     }
 }
 
+function Start-GgIfStopped {
+    $installation = Get-GgInstallation
+    if (!$installation.installed) { throw 'SteelSeries GG is not installed. Install GG and enable Sonar, then retry.' }
+    if ($installation.running) { return @{result='already_running'} }
+    Assert-SteelSeriesSignature $installation.executable
+    # Signature verification can take time; avoid launching again if GG started meanwhile.
+    if ((Get-GgInstallation).running) { return @{result='already_running'} }
+    $null = Start-Process -FilePath $installation.executable -WorkingDirectory (Split-Path $installation.executable -Parent) -WindowStyle Normal
+    @{result='starting'}
+}
+
 function Install-LatestGg {
     if (!$Consent) { throw 'Explicit consent is required to install or update SteelSeries GG.' }
     $latest = Get-LatestGg
@@ -183,6 +194,7 @@ try {
         'Inspect' { Get-GgInstallation }
         'Latest' { Get-LatestGg }
         'Install' { Install-LatestGg }
+        'Start' { Start-GgIfStopped }
         'Open' {
             $installation = Get-GgInstallation
             if (!$installation.installed) { throw 'SteelSeries GG is not installed.' }
@@ -219,7 +231,7 @@ try {
                 $latest = $null
                 try { $latest = Get-LatestGg } catch {
                     Add-Type -AssemblyName System.Windows.Forms
-                    $null = [Windows.Forms.MessageBox]::Show((Text 'GG의 최신 버전을 확인할 수 없습니다. 기존 설치를 유지합니다. Jack 설정에서 다시 확인할 수 있습니다.' 'The latest GG version could not be checked. Your existing installation will be kept. Retry in Jack settings.'), 'Jack')
+                    $null = [Windows.Forms.MessageBox]::Show((Text 'GG의 최신 버전을 확인할 수 없습니다. 기존 설치를 유지합니다. GG에서 업데이트를 확인해 주세요.' 'The latest GG version could not be checked. Your existing installation will be kept. Check for updates in GG.'), 'Jack')
                 }
                 if ($latest -and $installation.version -and [version]$installation.version -lt [version]$latest.version) {
                     $accepted = Confirm-Gg (Text "GG $($installation.version)이 설치되어 있습니다. 공식 최신 $($latest.version) 버전으로 업데이트할까요? 기존 설치를 사용하려면 아니요를 선택하세요." "GG $($installation.version) is installed. Update to the latest official version $($latest.version)? Choose No to keep the existing installation.")

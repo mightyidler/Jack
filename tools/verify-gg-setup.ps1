@@ -121,4 +121,32 @@ public class $($fixture.name)MetadataFixture { }
     }
     Remove-Item -LiteralPath $fixtureDirectory -Force
 }
-Write-Output 'GG setup: host/signature/consent/reuse guards and mocked install/upgrade/reboot/failure/cleanup passed. No installer was executed.'
+# Retry must start only an existing, verified, stopped GG. These mocks never launch it.
+function Get-GgInstallation {
+    $script:lookups++
+    @{installed=$script:startCase.installed;running=($script:startCase.running -or ($script:startCase.race -and $script:lookups -gt 1));executable='C:\Mock GG\SteelSeriesGG.exe'}
+}
+function Assert-SteelSeriesSignature([string]$Path) {
+    $script:signatureChecks++
+    if (!$script:startCase.signature) { throw 'Test signature rejection.' }
+}
+function Start-Process {
+    param($FilePath, $WorkingDirectory, $WindowStyle)
+    if ($FilePath -ne 'C:\Mock GG\SteelSeriesGG.exe' -or $WorkingDirectory -ne 'C:\Mock GG' -or $WindowStyle -ne 'Normal') { throw 'Unexpected GG launch target.' }
+    $script:starts++
+}
+foreach ($script:startCase in @(
+    @{installed=$true;running=$false;signature=$true;result='starting';starts=1;checks=1},
+    @{installed=$true;running=$true;result='already_running';starts=0;checks=0},
+    @{installed=$true;running=$false;race=$true;signature=$true;result='already_running';starts=0;checks=1},
+    @{installed=$false;running=$false;starts=0;checks=0},
+    @{installed=$true;running=$false;signature=$false;starts=0;checks=1}
+)) {
+    $script:lookups=0; $script:starts=0; $script:signatureChecks=0; $script:fetches=0
+    if ($startCase.result) {
+        $result=Start-GgIfStopped
+        if ($result.result -ne $startCase.result) { throw 'Incorrect GG startup result.' }
+    } else { Must-Fail { Start-GgIfStopped } }
+    if ($script:starts -ne $startCase.starts -or $script:signatureChecks -ne $startCase.checks -or $script:fetches) { throw 'Unexpected GG launch, signature check or download.' }
+}
+Write-Output 'GG setup: install guards, mocked outcomes/cleanup and explicit-retry launch/reuse/signature guards passed. No installer or GG was executed.'

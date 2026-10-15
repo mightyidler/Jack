@@ -126,7 +126,7 @@ function element<K extends keyof HTMLElementTagNameMap>(tag: K, className = '', 
   const el = document.createElement(tag); el.className = className; if (text !== undefined) el.textContent = text; return el;
 }
 type IconSize = 16 | 20 | 24;
-const compactIcons = new Set(['Chat','Chevron down','Desktop','Gaming','Headphones','Media','Mic','Puzzle','Speaker']);
+const compactIcons = new Set(['Chat','Chevron down','Desktop','Gaming','Headphones','Media','Mic','Puzzle','Refresh','Speaker']);
 function icon(name: string, size: IconSize = 24) {
   const img = element('span','icon');
   const file = name === 'X' && size === 16 ? 'X-16px' :
@@ -155,6 +155,13 @@ async function act(action: Record<string, unknown>) {
   revision++;
   const focusId = (document.activeElement as HTMLElement)?.id;
   busy = true; error = ''; updateDisabled();
+  if(action.kind==='sonar_retry') {
+    const retry=app.querySelector<HTMLButtonElement>('[data-sonar-retry]');
+    if(retry) {
+      retry.setAttribute('aria-busy','true');
+      retry.querySelector('.retry-label')!.textContent=state?.settings.language==='en'?'Connecting…':'연결 중…';
+    }
+  }
   try { state = await invoke<ViewState>('audio_action',{action}); }
   catch (e) { error = String(e); showToast(error,7000); try { state = await invoke<ViewState>('audio_action',{action:{kind:'read'}}); } catch { /* preserve the original error */ } }
   finally { busy = false; render(); if (focusId) document.getElementById(focusId)?.focus(); }
@@ -166,6 +173,15 @@ function updateDisabled() { app.querySelectorAll<HTMLButtonElement | HTMLSelectE
   } else el.disabled = busy || !native;
 }); }
 function control<T extends HTMLButtonElement | HTMLSelectElement>(el: T) { el.dataset.control = ''; el.disabled = busy || !native; return el; }
+function retryButton(action:()=>void,sonar=false) {
+  const btn=control(button('','retry',action));
+  btn.append(icon('Refresh',20),element('span','retry-label',t().retry));
+  if(sonar) {
+    btn.dataset.sonarRetry='';btn.id=quick?'quick-sonar-retry':'sonar-retry';
+    btn.setAttribute('aria-busy','false');
+  }
+  return btn;
+}
 function preferences(patch: Partial<Settings>) { if (state) { const next = {...state.settings,...patch}; void act({kind:'preferences',theme:next.theme,language:next.language,launch_at_login:next.launch_at_login}); } }
 function switchButton(label: string, enabled: boolean, action: () => void) {
   const btn = button('','switch',() => {
@@ -202,7 +218,7 @@ function render() {
     btn.addEventListener('keydown',e => { if (['ArrowLeft','ArrowRight','Home','End'].includes(e.key)) { e.preventDefault(); tab = tabIds[e.key === 'Home' ? 0 : e.key === 'End' ? 2 : (i + (e.key === 'ArrowRight' ? 1 : 2)) % 3]; render(); document.getElementById(`tab-${tab}`)?.focus(); } }); tabs.append(btn);
   }); header.append(top,tabs); frame.append(header);
   let content = element('main',`content ${tab}`); content.id = 'panel'; content.role = 'tabpanel'; content.setAttribute('aria-labelledby',`tab-${tab}`);
-  if (!state) { content.append(element('p','empty',error || m.loading),button(m.retry,'retry',() => void refresh())); }
+  if (!state) { content.append(element('p','empty',error || m.loading),retryButton(() => void refresh())); }
   else if (tab === 'settings') renderSettings(content);
   else {
     if (tab === 'render') {
@@ -385,16 +401,16 @@ function sonarConnection() {
       waiting:'Waiting for Sonar to finish starting. Jack will reconnect automatically.',
       incompatible:'This GG response is not supported. Check your GG version.',
       unsupported_mode:'Switch Sonar to Classic mode to use these controls.',
-      disconnected:'Open SteelSeries GG and enable Sonar. Jack will reconnect automatically.',
+      disconnected:'Retry starts SteelSeries GG if it is closed. Enable Sonar in GG to connect.',
     } : {
       disabled:'SteelSeries GG에서 Sonar를 켜 주세요.',
       waiting:'Sonar가 준비되면 자동으로 연결됩니다.',
       incompatible:'현재 GG 응답 형식을 지원하지 않습니다. GG 버전을 확인해 주세요.',
       unsupported_mode:'Sonar를 Classic 모드로 전환하면 제어할 수 있습니다.',
-      disconnected:'SteelSeries GG를 실행하고 Sonar를 켜 주세요. 자동으로 다시 연결합니다.',
+      disconnected:'다시 시도하면 꺼진 SteelSeries GG를 실행합니다. GG에서 Sonar를 켜 주세요.',
     };
     section.append(element('p','item-hint',hints[sonar.connection] ?? hints.disconnected),
-      control(button(t().retry,'retry',() => void act({kind:'sonar_retry'}))));
+      retryButton(() => void act({kind:'sonar_retry'}),true));
   }
   return section;
 }

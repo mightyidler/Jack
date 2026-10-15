@@ -224,9 +224,9 @@ function render() {
     if (tab === 'render') {
       const card = element('div','card separation'); const description = element('div','description'); description.append(element('p','item-title',m.outputSync),element('p','item-hint',m.outputSyncHint));
       const toggle = control(switchButton(m.outputSync,state.settings.link_group_outputs,() => void act({kind:'output_sync',enabled:!state!.settings.link_group_outputs}))); toggle.id = 'output-sync-toggle'; card.append(description,toggle); content.append(card);
-      if (state.sonar.connection !== 'connected') content.append(sonarConnection());
     }
-    if (tab === 'capture') content.append(deviceList('capture'));
+    if (!state.separation_available) content.append(sonarConnection());
+    else if (tab === 'capture') content.append(deviceList('capture'));
     else content.append(sonarChannels());
   }
   frame.append(content);
@@ -394,24 +394,23 @@ function sonarConnection() {
   const section = element('div','sonar-status');
   const sonar = state!.sonar;
   const english = state!.settings.language === 'en';
-  section.append(element('p','item-hint',sonar.connection === 'connected' ? `SteelSeries Sonar · ${sonar.mode}` : (english ? 'Sonar connection required' : 'Sonar 연결이 필요합니다')));
-  if (sonar.connection !== 'connected') {
-    const hints: Record<string,string> = english ? {
-      disabled:'Enable Sonar in SteelSeries GG.',
-      waiting:'Waiting for Sonar to finish starting. Jack will reconnect automatically.',
-      incompatible:'This GG response is not supported. Check your GG version.',
-      unsupported_mode:'Switch Sonar to Classic mode to use these controls.',
-      disconnected:'Retry starts SteelSeries GG if it is closed. Enable Sonar in GG to connect.',
-    } : {
-      disabled:'SteelSeries GG에서 Sonar를 켜 주세요.',
-      waiting:'Sonar가 준비되면 자동으로 연결됩니다.',
-      incompatible:'현재 GG 응답 형식을 지원하지 않습니다. GG 버전을 확인해 주세요.',
-      unsupported_mode:'Sonar를 Classic 모드로 전환하면 제어할 수 있습니다.',
-      disconnected:'다시 시도하면 꺼진 SteelSeries GG를 실행합니다. GG에서 Sonar를 켜 주세요.',
-    };
-    section.append(element('p','item-hint',hints[sonar.connection] ?? hints.disconnected),
-      retryButton(() => void act({kind:'sonar_retry'}),true));
-  }
+  const messages: Record<string,[string,string]> = english ? {
+    disabled:['Sonar is turned off','Enable Sonar in GG, then retry.'],
+    waiting:['Connecting to Sonar','Jack will connect when Sonar is ready.'],
+    incompatible:['Unable to connect to Sonar','Check your GG version, then retry.'],
+    unsupported_mode:['Classic mode required','Switch Sonar to Classic mode in GG.'],
+    disconnected:['Connect to Sonar','Retry to open GG and reconnect.'],
+  } : {
+    disabled:['Sonar가 꺼져 있습니다','GG에서 Sonar를 켠 뒤 다시 시도해 주세요.'],
+    waiting:['Sonar 연결 중','Sonar가 준비되면 자동으로 연결됩니다.'],
+    incompatible:['Sonar를 연결할 수 없습니다','GG 버전을 확인한 뒤 다시 시도해 주세요.'],
+    unsupported_mode:['Classic 모드가 필요합니다','GG에서 Sonar를 Classic 모드로 바꿔 주세요.'],
+    disconnected:['Sonar 연결이 필요합니다','다시 시도하면 GG를 실행하고 연결합니다.'],
+  };
+  const [title,subtitle]=messages[sonar.connection]??messages.disconnected;
+  const copy=element('div','sonar-status-copy');
+  copy.append(element('h2','sonar-status-title',title),element('p','sonar-status-subtitle',subtitle));
+  section.append(copy,retryButton(() => void act({kind:'sonar_retry'}),true));
   return section;
 }
 function configuredGroups(): (Group & {channel:OutputGroup})[] {
@@ -436,8 +435,8 @@ function sonarChannels(showApplications = true) {
   const english = state!.settings.language === 'en';
   const sonar = state!.sonar;
   const section = element('section','sonar-channels');
+  if (!state!.separation_available) return section;
   if (showApplications) section.append(sectionLabel(english ? 'Audio groups' : '오디오 그룹'));
-  if (!state!.separation_available) { section.append(element('p','empty',english ? 'Waiting for Sonar Classic mode.' : 'Sonar Classic 모드 연결을 기다리고 있습니다.')); return section; }
   const labels = groupLabels();
   const groups = configuredGroups();
   const appGroups = groupApplications(sonar.applications,state!.app_routing ?? []);
@@ -691,8 +690,8 @@ function renderQuick() {
   const content=prepared??element('div','quick-content'); content.dataset.pageId=subview?'2':'1';content.dataset.viewKey=subview;
   if(!state)content.append(element('p','empty',error||m.loading));
   else if(quickOutputGroup){if(!prepared)content.append(quickOutputDevices(quickOutputGroup));}
+  else if(!state.separation_available)content.append(sonarConnection());
   else {
-    if(state.sonar.connection!=='connected')content.append(sonarConnection());
     content.append(sonarChannels(false),element('div','quick-divider'));
     const accordion=element('section','t-acc'); accordion.dataset.open=String(inputExpanded);
     const head=button('','t-acc-head quick-input-toggle',()=>{

@@ -147,7 +147,7 @@ select { appearance:none; min-width:44px; padding:0; border:0; background:transp
 .retry { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-width:144px; min-height:40px; padding:10px 14px; border-radius:100px; background:var(--surface); color:var(--text); box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--text) 10%,transparent); font-size:14px; line-height:20px; letter-spacing:-.28px; font-weight:500;
   transition:transform var(--duration-release,380ms) cubic-bezier(.34,1.56,.64,1),background-color var(--duration-quick,150ms) var(--ease-smooth-out),opacity var(--duration-quick,150ms) ease-out;
 }
-.retry>.icon { flex:none; color:var(--accent); }
+.retry>.icon { flex:none; }
 .retry:active:enabled { transform:scale(.98); transition-duration:var(--duration-micro,80ms),var(--duration-quick,150ms),var(--duration-quick,150ms); }
 .retry:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
 .retry:disabled { opacity:.5; }
@@ -158,8 +158,11 @@ select { appearance:none; min-width:44px; padding:0; border:0; background:transp
 @media(prefers-reduced-motion:reduce) { .retry { transition:none; } .retry[aria-busy=true]>.icon { animation:none; } }
 .error { padding:12px; margin-top:16px; border-radius:12px; font-size:12px; line-height:16px; overflow-wrap:anywhere; color:var(--danger); background:var(--surface); }
 .preview-label { position:absolute; bottom:12px; left:24px; right:24px; font-size:11px; color:var(--hint); pointer-events:none; }
-.sonar-status { padding:8px 12px; }
-.sonar-status>.retry { margin-top:12px; }
+.sonar-status { padding:16px 0 0; }
+.sonar-status-copy { padding:0 12px; }
+.sonar-status-title { font-size:17px; line-height:24px; letter-spacing:-.34px; font-weight:500; }
+.sonar-status-subtitle { margin-top:4px; color:var(--secondary); font-size:13px; line-height:18px; letter-spacing:-.26px; }
+.sonar-status>.retry { display:flex; width:100%; min-width:0; margin-top:16px; }
 .sonar-channels { display:flex; flex-direction:column; gap:16px; }
 .separation+.sonar-channels { margin-top:16px; }
 .sonar-channels>.section-label { margin-bottom:-16px; }

@@ -1,0 +1,29 @@
+/* Text/icons exit for 150ms, then enter for 150ms; surface fades for 250ms. */
+:root { --device-text-duration:150ms; --device-surface-duration:250ms; --device-change-ease:ease-in-out; }
+/* Input selection: the surface leads, then the new check follows the old exit.
+   The row's label and microphone stay readable throughout the color change. */
+.device-section {
+  --device-text-duration:var(--duration-quick);
+  --device-surface-duration:var(--duration-fast);
+  --device-surface-ease:var(--ease-smooth-out);
+  --device-selection-blur:2px;
+}
+.device-section .input-volume-status { --volume-status-duration:var(--duration-quick); }
+.device-name:has(.device-label-layer) { position:relative; }
+.device-label-layer { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.device-label-outgoing { position:absolute; inset:0; pointer-events:none; }
+.device-row .icon:has(>.device-icon-layer) { position:relative; }
+.device-row .device-icon-layer { position:absolute; inset:0; }
+/* Selection never changes the hit rectangle or shifts the neighboring rows. */
+.device-section .device-row { min-height:50px; }
+.quick-panel .device-section .device-row { min-height:46px; }
+/* Every input row keeps the same surface/content/status slots. Selection only
+   changes paint; it never inserts a second background or moves the label. */
+.device-section .device-row:not(.selected) .volume-surface-clip,
+.device-section .device-row:not(.selected) .input-volume-status { opacity:0; }
+.device-section .device-row.selected .volume-surface-clip { opacity:1; }
+@media(prefers-reduced-motion:reduce) {
+  :root { --device-text-duration:0ms; --device-surface-duration:0ms; }
+  .device-section { --device-text-duration:0ms; --device-surface-duration:0ms; }
+  .device-section .input-volume-status { --volume-status-duration:0ms; }
+}

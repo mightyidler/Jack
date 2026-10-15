@@ -47,3 +47,21 @@ export function groupApplications(
     };
   });
 }
+
+// Unassigned, ambiguous or removed-channel sessions must remain reachable for
+// manual assignment rather than disappearing from the configured group list.
+export function partitionApplications(
+  sessions:readonly AudioApplication[],
+  identities:readonly ApplicationIdentity[],
+  visibleChannels:readonly string[],
+) {
+  const channels=new Map<string,ApplicationGroup[]>();
+  const other:ApplicationGroup[]=[];
+  for(const application of groupApplications(sessions,identities)) {
+    const channel=application.session.route;
+    if(!visibleChannels.includes(channel)) {other.push(application);continue;}
+    const bucket=channels.get(channel)??[];
+    bucket.push(application);channels.set(channel,bucket);
+  }
+  return {channels,other};
+}

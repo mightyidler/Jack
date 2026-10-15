@@ -1,0 +1,40 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {validateManifest, validateRelease, installerName, installerUrl, isNewerVersion} from './verify-release.mjs';
+
+const version = '0.1.6';
+const signature = Buffer.from('untrusted comment: signature from tauri secret key\nfixture').toString('base64');
+test('a release cannot replace an equal or newer public version', () => {
+  assert.ok(isNewerVersion('0.1.6', '0.1.5'));
+  assert.ok(isNewerVersion('0.1.10', '0.1.9'));
+  assert.ok(isNewerVersion('1.0.0', '0.99.99'));
+  assert.equal(isNewerVersion('0.1.6', '0.1.6'), false);
+  assert.equal(isNewerVersion('0.1.6', '0.1.7'), false);
+});
+function manifest() {
+  return {version, pub_date: '2026-10-16T00:00:00Z', platforms: Object.fromEntries(
+    ['windows-x86_64', 'windows-x86_64-nsis'].map(target => [target, {signature, url: installerUrl(version)}])
+  )};
+}
+function release() {
+  return {tag_name: `v${version}`, draft: false, prerelease: false, assets:
+    [installerName(version), `${installerName(version)}.sig`, 'latest.json'].map(name => ({name, size: 100}))};
+}
+
+test('public stable release requires all updater assets and rejects the previous draft-only failure', () => {
+  validateRelease(release(), version, true);
+  for (const mutate of [r => r.draft = true, r => r.prerelease = true, r => r.tag_name = 'v0.1.4', r => r.assets.pop(), r => r.assets[0].size = 0, r => r.assets.push(r.assets[0])]) {
+    const value = release(); mutate(value);
+    assert.throws(() => validateRelease(value, version, true));
+  }
+  const draft = release(); draft.draft = true;
+  validateRelease(draft, version, false);
+});
+
+test('manifest supports both Windows target formats and rejects stale or mismatched updates', () => {
+  validateManifest(manifest(), version, `${signature}\n`);
+  for (const mutate of [m => m.version = '0.1.4', m => delete m.platforms['windows-x86_64'], m => delete m.platforms['windows-x86_64-nsis'], m => m.platforms['windows-x86_64'].url = installerUrl('0.1.5'), m => m.platforms['windows-x86_64-nsis'].signature = 'wrong', m => m.pub_date = 'invalid']) {
+    const value = manifest(); mutate(value);
+    assert.throws(() => validateManifest(value, version, signature));
+  }
+});

@@ -5,7 +5,7 @@ Windows x64 dependency graph, including build and test dependencies. Not every l
 Directly reused code, fonts and icons: see THIRD_PARTY_NOTICES.md. Upstream license text is reproduced below.
 
 ========================================================================
-JavaScript: @tauri-apps/api 2.12.3
+JavaScript: @tauri-apps/api 2.12.4
 Declared license: Apache-2.0 OR MIT
 Source: git+https://github.com/tauri-apps/tauri.git
 

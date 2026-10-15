@@ -1,25 +1,27 @@
 /* Stable 44px layout, compositor transforms for the connected painted boxes.
    Corners are inverse-scaled in JS; labels and icons retain their sharpness. */
-.sonar-device-control {
+.sonar-device-control,.fluid-volume-control {
   --pair-press-duration:150ms; --pair-release-duration:250ms;
   --pair-outer:12px;
+}
+.sonar-device-control {
   min-height:44px; align-items:center; gap:4px;
 }
+.device-section .fluid-volume-control { --pair-outer:16px; }
 .quick-panel .sonar-device-control { --pair-outer:16px; }
 .sonar-device-control>.sonar-device-picker { width:44px; height:44px; background:transparent; box-shadow:none; isolation:isolate; }
-.sonar-device-control .volume-surface-clip,
-.sonar-device-control .volume-surface-clip:has(.volume-surface[data-geometry=true]) { inset:0; border-radius:inherit; overflow:visible; }
-.sonar-device-control .volume-surface,
-.sonar-device-control .volume-surface[data-geometry=true] { inset:0; border-radius:inherit; transform-origin:left center; }
+.sonar-device-control .volume-surface-clip,.fluid-volume-control .volume-surface-clip { inset:0; border-radius:inherit; overflow:visible; }
+.sonar-device-control .volume-surface,.fluid-volume-control .volume-surface { inset:0; border-radius:inherit; transform-origin:left center; }
 /* Ellipsis changes once on grab/release; tweening this margin would still run
    layout on every frame even though the painted boxes use transforms. */
-.sonar-device-control .volume-content .device-name { transition:none; }
+.sonar-device-control .volume-content .device-name,.fluid-volume-control .volume-content .device-name { transition:none; }
 .sonar-picker-surface {
   position:absolute; inset:0; border-radius:inherit; pointer-events:none;
   background:var(--volume-track); box-shadow:inset 0 0 0 1px var(--volume-track);
   transition:background-color var(--duration-quick) var(--ease-smooth-out);
 }
 .sonar-device-control[data-pair-moving=true] .volume-surface,
+.fluid-volume-control[data-pair-moving=true] .volume-surface,
 .sonar-device-control[data-pair-moving=true] .sonar-device-picker,
 .sonar-device-control[data-pair-moving=true] .sonar-picker-surface { will-change:transform; }
 .sonar-device-picker .sonar-output-open { z-index:1; padding:0; min-height:0; }

@@ -171,7 +171,7 @@ mod tests {
     #[test]
     fn equal_rate_is_exact_with_single_frame_packets() {
         let mut r = StreamingResampler::new(48000, 48000, 2, 4).unwrap();
-        for frame in input().chunks_exact(2) {
+        for frame in input().as_chunks::<2>().0.iter() {
             r.push(frame).unwrap();
             let mut out = [0.0; 2];
             assert_eq!(r.process(&mut out).unwrap(), 1);
@@ -199,7 +199,7 @@ mod tests {
             }
         }
         assert_eq!(result, &reference[..n * 2]);
-        assert!(result.chunks_exact(2).all(|f| f[0] == -f[1]));
+        assert!(result.as_chunks::<2>().0.iter().all(|f| f[0] == -f[1]));
     }
     #[test]
     fn ratio_and_linear_interpolation_match_known_ramp() {

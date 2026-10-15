@@ -20,6 +20,7 @@ function refreshPreview() {
   if(scenario!=='connected')query.set(scenario,'');
   if(scenario==='missing-source'){query.set('groups','4');query.set('missing-source','aux');}
   if(values.has('expanded'))query.set('expanded','');
+  if(values.has('volume-numbers'))query.set('volume-numbers','');
   const url=`/?${query}`;
   preview.style.width=screen==='tray'?'360px':'400px';
   preview.style.height=screen==='tray'?'760px':'680px';
@@ -27,5 +28,14 @@ function refreshPreview() {
 }
 options.addEventListener('submit',event=>event.preventDefault());
 options.addEventListener('change',refreshPreview);
+window.addEventListener('message',event=>{
+  if(event.origin!==location.origin || event.source!==preview.contentWindow || event.data?.type!=='jack-preview-volume-numbers' || typeof event.data.enabled!=='boolean')return;
+  options.querySelector<HTMLInputElement>('[name="volume-numbers"]')!.checked=event.data.enabled;
+  const selection=new URLSearchParams(location.search);
+  const target=new URL(open.href);
+  if(event.data.enabled){selection.set('volume-numbers','on');target.searchParams.set('volume-numbers','');}
+  else {selection.delete('volume-numbers');target.searchParams.delete('volume-numbers');}
+  history.replaceState(null,'',`?${selection}`);open.href=target.href;
+});
 document.getElementById('reload-preview')!.addEventListener('click',()=>{preview.src=open.href;});
 refreshPreview();

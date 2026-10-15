@@ -12,6 +12,9 @@ export function applyPreviewAction(state:ViewState, action:Record<string,unknown
     case 'output_sync':
       next.settings.link_group_outputs=Boolean(action.enabled);
       break;
+    case 'tray_volume_numbers':
+      next.settings.tray_volume_numbers_always_visible=Boolean(action.enabled);
+      break;
     case 'tray_shortcut':
       next.settings.tray_shortcut={enabled:Boolean(action.enabled),key:typeof action.key==='string'?action.key:null,modifiers:Number(action.modifiers)};
       break;
@@ -38,6 +41,16 @@ export function applyPreviewAction(state:ViewState, action:Record<string,unknown
       if(!device || !route || route.device_id!==command.expected)throw new Error('Preview device selection is stale');
       const microphone=command.channel==='microphone';
       if(device.role!==(microphone?'capture':'playback'))throw new Error('Preview device role does not match');
+      if(microphone) {
+        const volume=next.sonar.volumes.find(value=>value.channel==='microphone');
+        if(!volume)throw new Error('Preview microphone volume is not ready');
+        const saved=next.settings.microphone_device_volumes??={};
+        for(const input of next.sonar.devices.filter(input=>input.role==='capture' && input.enabled)) {
+          saved[input.id]??=volume.volume;
+        }
+        if(route.device_id)saved[route.device_id]=volume.volume;
+        volume.volume=saved[device.id];
+      }
       const activeChannels=new Set(next.settings.groups?.map(group=>group.sonar_channel) ?? ['game','chat','media']);
       for(const target of next.sonar.routes) {
         if(target.channel===command.channel || (!microphone && next.settings.link_group_outputs && activeChannels.has(target.channel))) {

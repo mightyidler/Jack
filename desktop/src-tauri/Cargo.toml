@@ -5,11 +5,11 @@ edition.workspace = true
 publish.workspace = true
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "2.7.3", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon", "image-png"] }
-tauri-plugin-single-instance = "2"
+tauri = { version = "2.12.4", features = ["tray-icon", "image-png"] }
+tauri-plugin-single-instance = "2.5.4"
 serde.workspace = true
 serde_json.workspace = true
 jack-core = { path = "../../crates/jack-core" }
@@ -20,7 +20,7 @@ windows = { workspace = true, features = ["Win32_System_Registry", "Win32_UI_Win
 image = { version = "0.25", default-features = false, features = ["png", "ico"] }
 base64 = "0.22"
 webview2-com = "0.39.1"
-tauri-plugin-updater = "2"
+tauri-plugin-updater = "2.14.0"
 
 [dev-dependencies]
 minisign-verify = "0.3"

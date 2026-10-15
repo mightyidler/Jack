@@ -1,26 +1,37 @@
 /* Paint owns its geometry; the paired control's flex spring preserves the gap. */
 .device-row[role=slider] { overflow:visible; isolation:isolate; background:transparent; box-shadow:none; color:var(--text); }
 .device-row[role=slider]:hover:not(:disabled) { background:transparent; }
-.volume-surface-clip { --clip-left:calc(.01 + var(--pair-left-bleed,var(--volume-left-bleed,0))); --clip-right:calc(.01 + var(--volume-right-bleed,0)); position:absolute; inset:-4% calc(-100% * var(--clip-right)) -4% calc(-100% * var(--clip-left)); overflow:hidden; pointer-events:none; border-radius:inherit; z-index:0; }
-.volume-surface-clip:has(.volume-surface[data-geometry=true]) { border-radius:0; }
-.volume-surface { position:absolute; top:calc(100% * .04 / 1.08); bottom:calc(100% * .04 / 1.08); left:calc(100% * var(--clip-left) / (1 + var(--clip-left) + var(--clip-right))); right:calc(100% * var(--clip-right) / (1 + var(--clip-left) + var(--clip-right))); border-radius:inherit; overflow:hidden; background:var(--volume-track); box-shadow:inset 0 0 0 1px var(--volume-track); transform-origin:var(--volume-origin,50%) center; transform:scaleX(calc(1 + var(--pair-left-scale,var(--volume-x-stretch,0)))) scaleY(var(--volume-scale-y,1)); }
-.volume-surface[data-geometry=true] { border-radius:var(--volume-base-0) var(--volume-base-1) var(--volume-base-2) var(--volume-base-3); }
+.volume-surface-clip { position:absolute; inset:0; overflow:hidden; pointer-events:none; border-radius:inherit; z-index:0; }
+.volume-surface { position:absolute; inset:0; border-radius:inherit; overflow:hidden; background:var(--volume-track); box-shadow:inset 0 0 0 1px var(--volume-track); transform-origin:left center; }
 .volume-content { position:relative; z-index:1; display:flex; align-items:center; gap:12px; flex:1; min-width:0; }
 .volume-content>.icon { position:relative; z-index:1; }
-.device-row[role=slider] .volume-fill { --volume-color-duration:250ms; transform-origin:left center; will-change:auto; transition:background-color var(--volume-color-duration) ease-in-out; }
+.device-row[role=slider] .volume-fill { --volume-color-duration:250ms; --volume-settle-time:380ms; will-change:auto; transition:background-color var(--volume-color-duration) ease-in-out; }
 /* The progress box turns blue while held, in BOTH app and tray. Text/icons
    keep their label color and all existing spring/scale motion stays intact. */
 .device-row[role=slider].adjusting .volume-fill { background:var(--volume-active-fill); }
 .device-row:is(.adjusting,.volume-returning,.volume-changing) .volume-fill { will-change:transform; }
-.sonar-percent { position:absolute; right:0; min-width:4ch; text-align:right; font-variant-numeric:tabular-nums; opacity:0; filter:blur(2px); transform:translateY(2px); pointer-events:none; transition:opacity 150ms ease-in-out,filter 150ms ease-in-out,transform 150ms ease-in-out; }
-.device-row:is(.adjusting,.volume-changing) .sonar-percent { opacity:1; filter:blur(0); transform:translateY(0); }
+.sonar-percent { --volume-number-duration:150ms; position:absolute; right:0; min-width:4ch; text-align:right; font-variant-numeric:tabular-nums; opacity:0; filter:blur(2px); transform:translateY(2px); pointer-events:none; transition:opacity var(--volume-number-duration) ease-in-out,filter var(--volume-number-duration) ease-in-out,transform var(--volume-number-duration) ease-in-out; }
+.sonar-device-control>.device-row:is(.adjusting,.volume-changing) .sonar-percent { opacity:1; filter:blur(0); transform:translateY(0); }
 .volume-content .device-name { margin-right:0; transition:margin-right 150ms ease-in-out; }
-.device-row:is(.adjusting,.volume-changing) .volume-content .device-name { margin-right:42px; }
-.volume-content .check { transition:opacity 150ms ease-in-out,filter 150ms ease-in-out; }
-.device-row:is(.adjusting,.volume-changing) .volume-content .check { opacity:0; filter:blur(2px); }
-/* Tray output channels keep a persistent percentage; input devices use the app's check/percentage swap. */
-.quick-panel .sonar-device-control .sonar-percent { position:relative; right:auto; opacity:1; filter:none; transform:none; font-size:15px; line-height:20px; font-weight:400; letter-spacing:-.3px; }
+.sonar-device-control>.device-row:is(.adjusting,.volume-changing) .volume-content .device-name { margin-right:42px; }
+/* Fixed input status slot: selection animates this parent only. Fade the old
+   child out before revealing the new one, including interrupted/reversed taps. */
+.input-volume-status { --volume-status-duration:150ms; position:relative; display:grid; align-items:center; justify-items:end; flex:0 0 48px; width:48px; min-width:0; height:24px; pointer-events:none; }
+.input-volume-status>.check,.input-volume-status>.sonar-percent {
+  grid-area:1 / 1;
+  transition-property:opacity,filter,visibility;
+  transition-duration:var(--volume-status-duration),var(--volume-status-duration),0ms;
+  transition-timing-function:var(--device-change-ease,ease-in-out),var(--device-change-ease,ease-in-out),linear;
+}
+.input-volume-status>.check { opacity:1; filter:blur(0); visibility:visible; transition-delay:var(--volume-status-duration),var(--volume-status-duration),var(--volume-status-duration); }
+.input-volume-status>.sonar-percent { position:relative; right:auto; min-width:0; transform:none; opacity:0; filter:blur(2px); visibility:hidden; transition-delay:0ms,0ms,var(--volume-status-duration); }
+.device-row.volume-interacting .input-volume-status>.check { opacity:0; filter:blur(2px); visibility:hidden; transition-delay:0ms,0ms,var(--volume-status-duration); }
+.device-row.volume-interacting .input-volume-status>.sonar-percent { opacity:1; filter:blur(0); visibility:visible; transition-delay:var(--volume-status-duration),var(--volume-status-duration),var(--volume-status-duration); }
+/* Reserve the number slot so revealing it never shifts the device name. */
+.quick-panel .sonar-device-control .sonar-percent { position:relative; right:auto; font-size:15px; line-height:20px; font-weight:400; letter-spacing:-.3px; }
+[data-tray-volume-numbers=always] .quick-panel .sonar-device-control .sonar-percent { opacity:1; filter:blur(0); transform:translateY(0); }
 .quick-panel .sonar-device-control .volume-content .device-name { margin-right:0; }
 @media(prefers-reduced-motion:reduce) {
-  .device-row[role=slider] .volume-fill,.sonar-percent,.volume-content .device-name,.volume-content .check { transition:none!important; }
+  .input-volume-status { --volume-status-duration:0ms; }
+  .device-row[role=slider] .volume-fill,.sonar-percent,.volume-content .device-name,.input-volume-status>.check { transition:none!important; }
 }

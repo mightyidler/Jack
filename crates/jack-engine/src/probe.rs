@@ -75,7 +75,7 @@ impl ContinuityChecker {
                 })
             });
         }
-        for measured in stereo.chunks_exact(2) {
+        for measured in stereo.as_chunks::<2>().0.iter() {
             self.checked += 1;
             if let Some(phase) = self.phase {
                 let expected = self.reference[phase];
@@ -145,7 +145,7 @@ pub fn analyze_against(
     let mut phase = 0;
     for offset in 0..PERIOD {
         let mut dot = 0.0;
-        for (frame, measured) in stereo.chunks_exact(2).take(512).enumerate() {
+        for (frame, measured) in stereo.as_chunks::<2>().0.iter().take(512).enumerate() {
             let expected = reference[(frame + offset) % PERIOD];
             dot += f64::from(expected[0]) * f64::from(measured[0])
                 + f64::from(expected[1]) * f64::from(measured[1]);
@@ -158,7 +158,7 @@ pub fn analyze_against(
     let mut channels = Vec::with_capacity(2);
     for channel in 0..2 {
         let (mut x2, mut y2, mut xy) = (0.0f64, 0.0f64, 0.0f64);
-        for (frame, measured) in stereo.chunks_exact(2).enumerate() {
+        for (frame, measured) in stereo.as_chunks::<2>().0.iter().enumerate() {
             let x = f64::from(reference[(frame + phase) % PERIOD][channel]);
             let y = f64::from(measured[channel]);
             x2 += x * x;
@@ -255,7 +255,7 @@ mod tests {
     #[test]
     fn silence_tone_channel_swap_and_wrong_gain_fail() {
         let mut pcm = fixture(0);
-        for frame in pcm.chunks_exact_mut(2) {
+        for frame in pcm.as_chunks_mut::<2>().0.iter_mut() {
             frame.swap(0, 1);
         }
         assert!(!analyze(&pcm).unwrap().passed);

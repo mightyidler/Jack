@@ -3,9 +3,10 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { listen } from '@tauri-apps/api/event';
 import './style.css';
 import './accordion.css';
-import { groupApplications, type ApplicationGroup } from './application-groups';
+import { partitionApplications, type ApplicationGroup } from './application-groups';
 import { bindAppDrag } from './app-drag';
 import { LiveVolume } from './live-volume';
+import { singleFlight } from './single-flight';
 import { deviceLabel } from './device-name';
 import './app-drag.css';
 import './tray.css';
@@ -27,12 +28,14 @@ import './rendering.css';
 import { showToast, updateSection } from './bald-updates';
 import { captureDividerOpacity, animateDividerOpacity } from './divider-motion';
 import './divider-motion.css';
+import { captureDevicePaint, animateDeviceChange } from './device-transition';
+import './device-transition.css';
 
 type Flow = 'render' | 'capture';
 export type Theme = 'system' | 'dark' | 'light';
 interface Group { id:string; display_name:string; sonar_channel?:OutputGroup|null; icon_asset_id?:string|null }
 interface TrayShortcut { enabled:boolean; key:string|null; modifiers:number }
-interface Settings { theme: Theme; language: string; launch_at_login: boolean; channel_separation_enabled: boolean; link_group_outputs: boolean; groups?: Group[]; tray_shortcut?:TrayShortcut }
+interface Settings { theme: Theme; language: string; launch_at_login: boolean; channel_separation_enabled: boolean; link_group_outputs: boolean; groups?: Group[]; tray_shortcut?:TrayShortcut; tray_volume_numbers_always_visible?:boolean; microphone_device_volumes?:Record<string,number> }
 interface Endpoint { id: string; name: string; flow: Flow; form_factor: number | null; defaults: string[]; volume: {level: number; muted: boolean} | null }
 export type Channel = 'game' | 'chat' | 'media' | 'aux' | 'microphone';
 type MixerChannel = Channel | 'master';
@@ -47,7 +50,7 @@ interface SonarState {
   applications: {process_id: number; process_name: string; display_name: string; route: string; activity: string; routing_error: boolean}[];
   sources: {channel: Channel; endpoint_id: string}[];
 }
-interface AppRoute {process_id:number;stable_id:string|null;requested:Channel|null;origin:string;pending:boolean;icon_data_url?:string|null}
+interface AppRoute {process_id:number;stable_id:string|null;requested:Channel|null;origin:string;pending:boolean;message?:string|null;icon_data_url?:string|null}
 export interface ViewState { settings: Settings; audio: {endpoints: Endpoint[]; warnings: string[]}; separation_available: boolean; sonar: SonarState; app_routing?:AppRoute[]; routing_warnings?:string[] }
 const native = isTauri();
 const params = new URLSearchParams(location.search);
@@ -68,7 +71,13 @@ let windowDragging=false;
 let shortcutRecording=false;
 let shortcutCaptureReady=false;
 let cancelDrag: (() => void) | null = null;
-const volumeMotions=new Map<Channel,VolumeMotion>();
+const volumeMotions=new Map<string,VolumeMotion>();
+let previousVolumeMotions=new Map<string,ReturnType<VolumeMotion['snapshot']>>();
+function retireVolumeMotions() {
+  previousVolumeMotions=new Map([...volumeMotions].map(([key,motion])=>[key,motion.snapshot()]));
+  volumeMotions.forEach(motion=>motion.dispose());
+  volumeMotions.clear();
+}
 let error = '';
 let visible = true;
 let reported = false;
@@ -153,6 +162,7 @@ function theme() {
   document.documentElement.dataset.theme = params.get('fixture') === 'design' && !params.has('theme') && import.meta.env.DEV ? 'dark' : light ? 'light' : 'dark';
   document.documentElement.lang = state?.settings.language ?? 'ko';
   document.documentElement.dataset.fastlaneTheme = document.documentElement.dataset.theme;
+  document.documentElement.dataset.trayVolumeNumbers=state?.settings.tray_volume_numbers_always_visible?'always':'adjusting';
 }
 async function act(action: Record<string, unknown>) {
   if (!controlsAvailable || busy) return;
@@ -170,6 +180,7 @@ async function act(action: Record<string, unknown>) {
     if (interactivePreview && state) {
       const { applyPreviewAction } = await import('./preview-actions');
       state = applyPreviewAction(state,action,fixture);
+      if((action.kind==='tray_volume_numbers' || action.kind==='reset') && parent!==window)parent.postMessage({type:'jack-preview-volume-numbers',enabled:!!state.settings.tray_volume_numbers_always_visible},location.origin);
     } else state = await invoke<ViewState>('audio_action',{action});
   }
   catch (e) { error = String(e); showToast(error,7000); if (native) try { state = await invoke<ViewState>('audio_action',{action:{kind:'read'}}); } catch { /* preserve the original error */ } }
@@ -210,6 +221,8 @@ function render() {
   const oldFrame=app.querySelector<HTMLElement>('.window');
   const oldPanel = document.getElementById('panel');
   const dividerOpacity=captureDividerOpacity(oldPanel);
+  const devicePaint=captureDevicePaint(oldPanel?.classList.contains(tab)?oldPanel:null);
+  retireVolumeMotions();
   const scrollTop = oldPanel?.classList.contains(tab) ? oldPanel.scrollTop : 0;
   disposeScrollbars.forEach(dispose => dispose()); disposeScrollbars=[];
   theme(); const m = t(); let frame:HTMLElement = element('div','window');
@@ -238,6 +251,10 @@ function render() {
     if (!state.separation_available) content.append(sonarConnection());
     else if (tab === 'capture') content.append(deviceList('capture'));
     else content.append(sonarChannels());
+  }
+  if(state?.routing_warnings?.length) {
+    const warning=element('p','item-hint',state.routing_warnings.join('\n'));
+    warning.role='status';content.append(warning);
   }
   frame.append(content);
   if (!native && params.get('fixture') !== 'design') frame.append(element('p','preview-label',m.preview));
@@ -293,6 +310,7 @@ function render() {
   disposeScrollbars.push(mountScrollbar(content,frame,'main'));
   content.scrollTop = scrollTop;
   animateDividerOpacity(content,dividerOpacity);
+  animateDeviceChange(content,devicePaint);
   if (focused) document.getElementById(focused)?.focus({preventScroll:true});
 }
 function renderSettings(content: HTMLElement) {
@@ -326,7 +344,13 @@ function renderSettings(content: HTMLElement) {
     const {wrap,trigger}=preferenceDropdown(id,label,values.map((value,i)=>({value,label:labels[i],lang:value==='ko'?'ko':value==='en'?'en':undefined})),selected,action);
     control(trigger); row.append(text,wrap); return row;
   }
-  envCard.append(selectRow(m.language,'language-select',['ko','en'],['한국어','English'],s.language,v => preferences({language:v})),element('div','setting-divider'),selectRow(m.theme,'theme-select',['system','light','dark'],[m.system,m.light,m.dark],s.theme,v => preferences({theme:v as Theme}))); env.append(envCard);
+  const numbersRow=element('div','startup');const numbersDescription=element('div','description');
+  const numbersTitle=english?'Always show volume levels':'볼륨 수치 항상 표시';
+  const numbersHint=element('p','item-hint',english?'Keep volume levels visible in quick controls.':'빠른 볼륨 조절에서 수치를 항상 표시합니다');numbersHint.id='tray-volume-numbers-hint';
+  numbersDescription.append(element('p','item-title',numbersTitle),numbersHint);
+  const numbersToggle=control(switchButton(numbersTitle,!!s.tray_volume_numbers_always_visible,()=>void act({kind:'tray_volume_numbers',enabled:!state!.settings.tray_volume_numbers_always_visible})));
+  numbersToggle.id='tray-volume-numbers-toggle';numbersToggle.setAttribute('aria-describedby',numbersHint.id);numbersRow.append(numbersDescription,numbersToggle);
+  envCard.append(selectRow(m.language,'language-select',['ko','en'],['한국어','English'],s.language,v => preferences({language:v})),element('div','setting-divider'),selectRow(m.theme,'theme-select',['system','light','dark'],[m.system,m.light,m.dark],s.theme,v => preferences({theme:v as Theme})),element('div','setting-divider'),numbersRow); env.append(envCard);
   const ops = element('div','card operations'); const reset = control(button(m.reset,'operation danger',resetDialog)); reset.id = 'reset-button';
   const quit = button(m.quit,'operation',() => { if (native && !busy) void invoke('quit').catch(e => { error = String(e); showToast(error,7000); render(); }); }); quit.disabled = !native; ops.append(reset,element('div','setting-divider'),quit); content.append(startup,shortcuts,env,updateSection(english,native,render,()=>state?.settings.language==='en'),ops);
 }
@@ -387,15 +411,27 @@ function deviceList(flow: Flow, heading = true) {
     const active = device.id === selected; const row = control(button('','device-row',() => {
       if (!active && route) void act({kind:'sonar',command:{operation:'route',channel:'microphone',device_id:device.id,expected:route.device_id}});
     })); row.id = `device-${flow}-${device.id}`;
+    row.dataset.deviceMotionKey=JSON.stringify([flow,device.id]);
     row.disabled ||= !state!.separation_available || !route;
     row.dataset.endpoint = device.id;
     row.classList.toggle('selected',active); row.title = deviceLabel(device.name);
     // Device IDs and availability come from GG; Windows metadata only supplies the icon shape.
     const image = icon('Mic',quick ? 20 : 24);
-    const label = element('span','device-name',deviceLabel(device.name)); row.append(image,label);
-    if (active) {
-      const fill = element('span','volume-fill'); fill.style.width = `${(micVolume?.volume ?? 0) * 100}%`; row.prepend(fill); const check = icon('Check',quick ? 20 : 24); check.classList.add('check'); row.append(check);
-      if (micVolume) bindVolume(row,fill,{id:device.id,name:device.name,flow:'capture',form_factor:null,defaults:[],volume:{level:micVolume.volume,muted:micVolume.muted}},'microphone');
+    const label = element('span','device-name',deviceLabel(device.name));
+    const check=icon('Check',quick ? 20 : 24);check.classList.add('check');
+    const level=active ? micVolume?.volume ?? 0 : state!.settings.microphone_device_volumes?.[device.id] ?? 0;
+    // Keep selection and volume feedback in one fixed slot on every input row.
+    // Its parent fades on selection; its children own only the check/value swap.
+    const status=element('span','input-volume-status');status.setAttribute('aria-hidden','true');
+    status.append(check,element('span','sonar-percent',`${Math.round(level*100)}%`));
+    const content=element('span','volume-content');content.append(image,label,status);
+    const fill=element('span','volume-fill');fill.style.width='100%';fill.style.transform=`scaleX(${level})`;
+    const surface=element('span','volume-surface');surface.append(fill);
+    const clip=element('span','volume-surface-clip');clip.setAttribute('aria-hidden','true');clip.append(surface);
+    row.append(clip,content);
+    if (active && micVolume) {
+      bindVolume(row,fill,{id:device.id,name:device.name,flow:'capture',form_factor:null,defaults:[],volume:{level:micVolume.volume,muted:micVolume.muted}},'microphone');
+      bindFluidControls(row);
     }
     list.append(row);
     if (i < devices.length - 1) {
@@ -457,16 +493,13 @@ function sonarChannels(showApplications = true) {
   const labels = groupLabels();
   const groups = configuredGroups();
   const routingByProcess = new Map<number,AppRoute>();
-  const applicationsByChannel = new Map<string,ApplicationGroup[]>();
+  let applicationsByChannel = new Map<string,ApplicationGroup[]>();
+  let otherApplications:ApplicationGroup[]=[];
   if (showApplications) {
     const routing = state!.app_routing ?? [];
     for (const entry of routing) routingByProcess.set(entry.process_id,entry);
-    for (const application of groupApplications(sonar.applications,routing)) {
-      const channel = application.session.route;
-      const applications = applicationsByChannel.get(channel) ?? [];
-      applications.push(application);
-      applicationsByChannel.set(channel,applications);
-    }
+    const partition=partitionApplications(sonar.applications,routing,groups.map(group=>group.channel));
+    applicationsByChannel=partition.channels;otherApplications=partition.other;
   }
   for (const group of groups) {
     const channel = group.channel;
@@ -489,6 +522,8 @@ function sonarChannels(showApplications = true) {
     card.append(head);
     {
       const row = control(button('','device-row selected',() => {})); row.id = `sonar-volume-${channel}`;
+      row.dataset.deviceMotionKey=JSON.stringify(['output',channel]);
+      row.dataset.endpoint=route?.device_id??'';
       row.disabled ||= !outputAvailable;
       const name = route?.device_name ?? (english ? 'Output disconnected' : '출력 장치 연결 해제');
       const fill = element('span','volume-fill'); fill.style.width = `${level * 100}%`;
@@ -528,6 +563,16 @@ function sonarChannels(showApplications = true) {
     section.append(card);
   }
   if (showApplications) {
+    if(otherApplications.length) {
+      const card=element('div','card sonar-channel');
+      card.append(element('h2','item-title',english?'Other applications':'다른 앱'));
+      const applications=element('div','sonar-app-list');
+      for(const application of otherApplications) {
+        if(applications.childElementCount)applications.append(element('div','sonar-app-divider'));
+        applications.append(sonarApplication(application,labels,routingByProcess));
+      }
+      card.append(applications);section.append(card);
+    }
     const add = control(button('','sonar-group-add',() => void act({kind:'add_group'}))); add.id = 'group-add';
     add.append(icon('Plus'),element('span','',english ? 'Add group' : '그룹 추가'));
     add.disabled = !controlsAvailable || groups.length >= 4;
@@ -620,6 +665,8 @@ function sonarApplication(application: ApplicationGroup, labels: Record<MixerCha
   const meta=routingByProcess.get(session.process_id);
   const info=element('div','sonar-app-info');info.append(element('span','device-name',name));
   info.title = `${session.process_name} (${application.process_ids.join(', ')})`;
+  const message=[...new Set(application.process_ids.map(pid=>routingByProcess.get(pid)?.message).filter(Boolean))].join('\n');
+  if(message) {info.title+=`\n${message}`;info.append(element('span','item-hint',message));}
   const programIcon=element('img','sonar-app-icon');programIcon.alt='';programIcon.width=programIcon.height=24;programIcon.draggable=false;
   let iconSource: string | null | undefined;
   for (const pid of application.process_ids) {
@@ -702,6 +749,7 @@ function scheduleQuickOutputPreparation() {
   }
 }
 function renderQuick() {
+  retireVolumeMotions();
   const focused=(document.activeElement as HTMLElement)?.id;
   if(quickOutputGroup && !configuredGroups().some(group=>group.channel===quickOutputGroup)) quickOutputGroup=null;
   const subview=quickOutputGroup??'';
@@ -755,32 +803,42 @@ function bindVolume(row: HTMLButtonElement, fill: HTMLElement, device: Endpoint,
   row.setAttribute('aria-valuemin','0');row.setAttribute('aria-valuemax','100');row.setAttribute('aria-valuenow',String(Math.round(next*100)));
   let percent=row.querySelector<HTMLElement>('.sonar-percent');
   if(!percent){percent=element('span','sonar-percent',`${Math.round(next*100)}%`);row.append(percent);}
-  const content=element('span','volume-content');
-  [...row.children].filter(child=>child!==fill).forEach(child=>content.append(child));
-  const clip=element('span','volume-surface-clip');clip.setAttribute('aria-hidden','true');
-  const surface=element('span','volume-surface');surface.append(fill);clip.append(surface);row.append(clip,content);
-  const previous=volumeMotions.get(channel);
-  const initial=row.disabled?undefined:previous?.snapshot();previous?.dispose();
+  const inputStatus=row.querySelector<HTMLElement>('.input-volume-status');
+  const content=row.querySelector<HTMLElement>(':scope > .volume-content')??element('span','volume-content');
+  const clip=row.querySelector<HTMLElement>(':scope > .volume-surface-clip')??element('span','volume-surface-clip');
+  [...row.children].filter(child=>child!==fill && child!==content && child!==clip).forEach(child=>content.append(child));
+  clip.setAttribute('aria-hidden','true');
+  const surface=clip.querySelector<HTMLElement>('.volume-surface')??element('span','volume-surface');
+  surface.append(fill);clip.append(surface);row.append(clip,content);
+  // A microphone channel is shared by Sonar, but each physical input owns its
+  // painted level. Never carry another device's position or velocity into it.
+  const motionKey=JSON.stringify([channel,channel==='microphone'?device.id:null]);
+  const initial=row.disabled?undefined:previousVolumeMotions.get(motionKey);
   let paintedPercent=-1;
-  const motion=new VolumeMotion(fill,surface,next,level=>{
+  const motion=new VolumeMotion(fill,next,level=>{
     row.classList.toggle('volume-changing',Math.abs(level-next)>.0002);
     const value=Math.round(level*100);
     if(value!==paintedPercent){paintedPercent=value;percent!.textContent=`${value}%`;}
   },initial);
-  volumeMotions.set(channel,motion);motion.set(next);
+  volumeMotions.set(motionKey,motion);motion.set(next);
   const update=(value:number,overrun=0)=>{
     const clamped=Math.min(1,Math.max(0,value));next=Math.round(clamped*100)/100;
-    const paired=updateFluidVolume(row,overrun,clamped);
-    motion.set(clamped,paired?0:overrun);row.setAttribute('aria-valuenow',String(Math.round(next*100)));
+    updateFluidVolume(row,overrun,clamped);
+    motion.set(next);row.setAttribute('aria-valuenow',String(Math.round(next*100)));
     stream?.set(next);
   };
   const begin=(isPointer:boolean)=>{
     revision++;epoch++;error='';dragging=true;held=isPointer;releasing=false;bounds=row.getBoundingClientRect();
     row.classList.remove('volume-returning');
+    if(inputStatus)row.classList.add('volume-interacting');
     stream=new LiveVolume(next,async(level,expected)=>{
       const actual=native?await invoke<number>('audio_volume',{target:{kind:'sonar',channel},level,expected}):level;
-      const entry=state?.sonar.volumes.find(value=>value.channel===channel);if(entry)entry.volume=actual;return actual;
-    },failure=>{error=String(failure);});
+      const entry=state?.sonar.volumes.find(value=>value.channel===channel);if(entry)entry.volume=actual;
+      if(state && channel==='microphone' && state.sonar.routes.some(route=>route.channel===channel && route.device_id===device.id)) {
+        (state.settings.microphone_device_volumes??={})[device.id]=actual;
+      }
+      return actual;
+    },failure=>{error=String(failure);showToast(error,7000);});
     if(held){row.classList.add('adjusting');void holdFluidVolume(row,true);motion.grab();}
   };
   const end=async(flush:boolean)=>{
@@ -788,18 +846,27 @@ function bindVolume(row: HTMLButtonElement, fill: HTMLElement, device: Endpoint,
     stream=null;const captured=pointer;pointer=null;cancelDrag=null;
     if(captured!==null && row.hasPointerCapture(captured))row.releasePointerCapture(captured);
     const ending=epoch;releasing=true;
-    row.classList.remove('adjusting');row.classList.add('volume-returning');
+    row.classList.remove('adjusting','volume-interacting');row.classList.add('volume-returning');
     // A short tap can settle the spring before the color fade has finished.
-    // Keep this painted node alive for its CSS transition as well as the spring.
+    // Keep this painted node alive for the spring, color fade, and both halves
+    // of the input status swap, so rendering cannot cut off the returning check.
     const colorTime=getComputedStyle(fill).getPropertyValue('--volume-color-duration').trim();
-    const colorDuration=held && !matchMedia('(prefers-reduced-motion: reduce)').matches
+    const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const colorDuration=held && !reduced
       ? cssTimeMs(colorTime,250) : 0;
-    const faded=new Promise<void>(resolve=>setTimeout(resolve,colorDuration));
+    const statusDuration=inputStatus && !reduced
+      ? cssTimeMs(getComputedStyle(inputStatus).getPropertyValue('--volume-status-duration'),150)*2 : 0;
+    const faded=new Promise<void>(resolve=>setTimeout(resolve,Math.max(colorDuration,statusDuration)));
     const released=motion.release();busy=true;
+    // Keyboard changes can finish their spring after the color/status fades.
+    // Let the number's exit finish before a render replaces this painted node.
+    const numberDuration=!inputStatus && !reduced && !(quick && state?.settings.tray_volume_numbers_always_visible)
+      ? cssTimeMs(getComputedStyle(percent!).getPropertyValue('--volume-number-duration'),150) : 0;
+    const numberFaded=numberDuration>0?released.then(()=>new Promise<void>(resolve=>setTimeout(resolve,numberDuration))):released;
     const pairReleased=holdFluidVolume(row,false);
     await active.finish(flush);
     if(ending===epoch)busy=false;
-    await Promise.all([released,faded,pairReleased]);
+    await Promise.all([numberFaded,faded,pairReleased]);
     if(ending!==epoch)return;
     releasing=false;row.classList.remove('volume-returning');dragging=false;
     // Volume state is already current. Replacing these controls now would cut
@@ -830,7 +897,7 @@ function bindVolume(row: HTMLButtonElement, fill: HTMLElement, device: Endpoint,
     event.preventDefault();begin(false);update(event.key==='Home'?0:event.key==='End'?1:next+(['ArrowRight','ArrowUp'].includes(event.key)?1:-1)*(event.shiftKey?.01:.05));void end(true);
   });
 }
-async function refresh(force = false) {
+const refresh=singleFlight(async (force = false) => {
   if (busy || dragging || windowDragging || shortcutRecording || (!force && (document.hidden || !visible))) return;
   // A focused, closed picker must not stop external changes from reaching the UI.
   // Keep an actually open native menu intact while a background read finishes.
@@ -843,13 +910,13 @@ async function refresh(force = false) {
       if (requestedRevision !== revision || busy || dragging || windowDragging || shortcutRecording || editing()) return;
       const visible = (value: ViewState | null) => value ? JSON.stringify([
         value.settings,value.audio.endpoints.map(({id,name,flow,form_factor})=>[id,name,flow,form_factor]),value.separation_available,
-        value.sonar.connection,value.sonar.mode,value.sonar.volumes,value.sonar.routes,value.sonar.devices,value.sonar.applications,
-        value.app_routing?.map(({process_id,stable_id,requested,origin,pending,icon_data_url})=>[process_id,stable_id,requested,origin,pending,icon_data_url]),
+        value.sonar.connection,value.sonar.message,value.sonar.mode,value.sonar.volumes,value.sonar.routes,value.sonar.devices,value.sonar.applications,
+        value.app_routing?.map(({process_id,stable_id,requested,origin,pending,message,icon_data_url})=>[process_id,stable_id,requested,origin,pending,message,icon_data_url]),value.routing_warnings,
       ]) : '';
       if (visible(next) !== visible(state)) { state = next; render(); void reportNative().catch(e => { error = String(e); render(); }); }
     }
   } catch (e) { if (requestedRevision === revision) { const message=String(e);if(state&&error!==message)showToast(message,7000);error=message;render(); } }
-}
+});
 function fixture(): ViewState {
   const names = ['Razer BlackShark V2 Pro','LG TV SSCR2(NVIDIA High Definition Audio)','Sony WH-1000XM6','Speaker'];
   const preview: ViewState = {settings:{theme:'system' as Theme,language:'ko',launch_at_login:true,channel_separation_enabled:true,link_group_outputs:true},separation_available:params.has('sonar'),sonar:{connection:'disconnected',message:null,mode:null,volumes:[],routes:[],devices:[],applications:[],sources:[]},audio:{warnings:[] as string[],endpoints:(['render','capture'] as Flow[]).flatMap(flow => names.map((name,i) => ({id:`preview-${flow}-${i}`,name,flow,form_factor:[3,9,3,1][i],defaults:i === 0 ? ['console','multimedia'] : [],volume:{level:.25735,muted:false}})))}};
@@ -865,6 +932,11 @@ function fixture(): ViewState {
     preview.sonar.devices.push(...names.slice(0,3).map((name,i) => ({id:`preview-capture-${i}`,name:`Microphone (${name})`,role:'capture' as const,enabled:true})));
     const mic = preview.sonar.routes.find(route => route.channel === 'microphone')!;
     mic.device_id = 'preview-capture-0'; mic.device_name = `Microphone (${names[0]})`;
+    // Seed every input before the first gesture, not when it is first selected.
+    const micLevel=preview.sonar.volumes.find(volume=>volume.channel==='microphone')!.volume;
+    preview.settings.microphone_device_volumes=Object.fromEntries(preview.sonar.devices
+      .filter(device=>device.role==='capture' && device.enabled)
+      .map(device=>[device.id,micLevel]));
     // Raw Windows VADs must not appear in a physical-device picker.
     preview.audio.endpoints.push({id:'preview-sonar-vad',name:'SteelSeries Sonar - Microphone',flow:'capture',form_factor:4,defaults:['console'],volume:{level:.8,muted:false}});
   }
@@ -875,6 +947,7 @@ function fixture(): ViewState {
   if (params.has('grouped-apps')) preview.app_routing = preview.sonar.applications.map(session => ({process_id:session.process_id,stable_id:`path:preview/${session.process_name}`,requested:session.route as Channel,origin:'automatic',pending:false}));
   if (params.get('theme') === 'light' || params.get('theme') === 'dark') preview.settings.theme = params.get('theme') as Theme;
   if (params.get('lang') === 'en') preview.settings.language = 'en';
+  preview.settings.tray_volume_numbers_always_visible=params.has('volume-numbers');
   if (params.has('long')) {
     const suffix=' — USB High Definition Audio Device with a very long device name';
     preview.audio.endpoints.forEach(device=>device.name+=suffix);

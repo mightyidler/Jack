@@ -228,6 +228,7 @@ pub fn validate_local_url(url: &Url) -> Result<()> {
         && host_ok
         && url.username().is_empty()
         && url.password().is_none()
+        && url.query().is_none()
         && url.fragment().is_none()
     {
         Ok(())

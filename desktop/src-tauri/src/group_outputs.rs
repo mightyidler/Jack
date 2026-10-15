@@ -1,4 +1,5 @@
-//! A physical output selection changes configured output groups only.
+//! Physical device selection with independent per-device volume memory.
+//! Output linking applies to configured groups; microphones remain independent.
 use jack_core::Settings;
 use jack_sonar::{
     Command, Service, State,
@@ -54,6 +55,11 @@ pub fn remember(settings: &mut Settings, state: &State) -> bool {
             continue;
         };
         if route.device_id.is_empty()
+            || !state.devices.iter().any(|device| {
+                device.id == route.device_id
+                    && device.enabled
+                    && device.role == DeviceRole::Playback
+            })
             || !volume.volume.is_finite()
             || !(0.0..=1.0).contains(&volume.volume)
         {
@@ -70,6 +76,48 @@ pub fn remember(settings: &mut Settings, state: &State) -> bool {
             changed = true;
         }
     }
+    if let Some(route) = state
+        .routes
+        .iter()
+        .find(|r| r.channel == Channel::Microphone)
+        && state
+            .devices
+            .iter()
+            .any(|d| d.id == route.device_id && d.enabled && d.role == DeviceRole::Capture)
+        && let Some(volume) = state.volumes.iter().find(|v| {
+            v.channel == MixerChannel::Microphone
+                && v.volume.is_finite()
+                && (0.0..=1.0).contains(&v.volume)
+        })
+        && !route.device_id.is_empty()
+    {
+        // Sonar exposes one microphone mixer level, not a level for every
+        // inactive input. Pin unvisited devices when first discovered, before
+        // editing the active input can change their first-selection fallback.
+        for device in state
+            .devices
+            .iter()
+            .filter(|d| d.enabled && d.role == DeviceRole::Capture && !d.id.is_empty())
+        {
+            settings
+                .microphone_device_volumes
+                .entry(device.id.clone())
+                .or_insert_with(|| {
+                    changed = true;
+                    volume.volume
+                });
+        }
+        if settings
+            .microphone_device_volumes
+            .get(&route.device_id)
+            .is_none_or(|old| (old - volume.volume).abs() > 0.000001)
+        {
+            settings
+                .microphone_device_volumes
+                .insert(route.device_id.clone(), volume.volume);
+            changed = true;
+        }
+    }
     changed
 }
 pub fn select(
@@ -78,15 +126,27 @@ pub fn select(
     channel: Channel,
     device: &str,
     expected: &str,
+    commit: impl FnOnce(&Settings) -> Result<(), String>,
 ) -> Result<Settings, String> {
-    select_with(service, settings, channel, device, expected)
+    select_with_commit(service, settings, channel, device, expected, commit)
 }
+#[cfg(test)]
 fn select_with(
     service: &mut impl OutputService,
     settings: &Settings,
     channel: Channel,
     device: &str,
     expected: &str,
+) -> Result<Settings, String> {
+    select_with_commit(service, settings, channel, device, expected, |_| Ok(()))
+}
+fn select_with_commit(
+    service: &mut impl OutputService,
+    settings: &Settings,
+    channel: Channel,
+    device: &str,
+    expected: &str,
+    commit: impl FnOnce(&Settings) -> Result<(), String>,
 ) -> Result<Settings, String> {
     let before = service.read();
     if !before.available() {
@@ -97,42 +157,48 @@ fn select_with(
         .iter()
         .any(|r| r.channel == channel && r.device_id == expected)
     {
-        return Err("Output changed externally; refresh before retrying".into());
+        return Err("Audio device changed externally; refresh before retrying".into());
     }
     // Microphone controls are independent of physical playback linking.
-    if channel == Channel::Microphone {
-        service.route(channel, device, expected)?;
-        return Ok(settings.clone());
-    }
+    let microphone = channel == Channel::Microphone;
     let channels: Vec<_> = settings
         .groups
         .iter()
         .filter_map(|g| g.output_channel())
         .map(crate::sonar_routing::channel)
         .collect();
-    if !channels.contains(&channel) {
+    if !microphone && !channels.contains(&channel) {
         return Err("The selected group no longer exists".into());
     }
+    let role = if microphone {
+        DeviceRole::Capture
+    } else {
+        DeviceRole::Playback
+    };
     if !before
         .devices
         .iter()
-        .any(|d| d.id == device && d.enabled && d.role == DeviceRole::Playback)
+        .any(|d| d.id == device && d.enabled && d.role == role)
     {
-        return Err("The output device is disconnected".into());
+        return Err("The audio device is disconnected".into());
     }
-    let targets: Vec<_> = channels
-        .into_iter()
-        .filter(|c| settings.link_group_outputs || *c == channel)
-        .map(|c| {
-            before
-                .routes
-                .iter()
-                .find(|r| r.channel == c)
-                .filter(|_| before.sources.iter().any(|s| s.channel == c))
-                .map(|r| (c, r.device_id.clone()))
-                .ok_or_else(|| "A group output is not ready".to_string())
-        })
-        .collect::<Result<_, _>>()?;
+    let targets: Vec<_> = if microphone {
+        vec![(channel, expected.to_owned())]
+    } else {
+        channels
+            .into_iter()
+            .filter(|c| settings.link_group_outputs || *c == channel)
+            .map(|c| {
+                before
+                    .routes
+                    .iter()
+                    .find(|r| r.channel == c)
+                    .filter(|_| before.sources.iter().any(|s| s.channel == c))
+                    .map(|r| (c, r.device_id.clone()))
+                    .ok_or_else(|| "A group output is not ready".to_string())
+            })
+            .collect::<Result<_, _>>()?
+    };
     // Save outgoing levels before any route writes (GG may couple routes).
     let mut next = settings.clone();
     remember(&mut next, &before);
@@ -143,15 +209,20 @@ fn select_with(
                 .volumes
                 .iter()
                 .find(|v| v.channel == MixerChannel::from(*channel))
-                .ok_or("A group volume is not ready")?
+                .ok_or("Audio volume is not ready")?
                 .volume;
-            let saved = next
-                .groups
-                .iter()
-                .find(|g| g.output_channel().map(crate::sonar_routing::channel) == Some(*channel))
-                .and_then(|g| g.device_volumes.get(device))
-                .copied()
-                .unwrap_or(current);
+            let saved = if *channel == Channel::Microphone {
+                next.microphone_device_volumes.get(device)
+            } else {
+                next.groups
+                    .iter()
+                    .find(|g| {
+                        g.output_channel().map(crate::sonar_routing::channel) == Some(*channel)
+                    })
+                    .and_then(|g| g.device_volumes.get(device))
+            }
+            .copied()
+            .unwrap_or(current);
             Ok((
                 *channel,
                 current,
@@ -168,7 +239,7 @@ fn select_with(
                 .routes
                 .iter()
                 .find(|r| r.channel == *channel)
-                .ok_or("A group output disappeared")?;
+                .ok_or("Audio device disappeared")?;
             if route.device_id == device {
                 // GG can couple outputs itself; accept the preceding write's result.
                 if previous != device {
@@ -177,14 +248,14 @@ fn select_with(
                 continue;
             }
             if route.device_id != *previous {
-                return Err("A group output changed externally".into());
+                return Err("Audio device changed externally".into());
             }
             // Include uncertain writes in recovery: a failed readback may follow a successful PUT.
             changed.push((*channel, previous.clone()));
             service.route(*channel, device, previous)?;
         }
         for (channel, previous, desired) in &levels {
-            if (previous - desired).abs() <= 0.000001 {
+            if *channel != Channel::Microphone && (previous - desired).abs() <= 0.000001 {
                 continue;
             }
             let current = service.read();
@@ -193,10 +264,26 @@ fn select_with(
                 .iter()
                 .any(|r| r.channel == *channel && r.device_id == device)
             {
-                return Err("A group output changed before volume restore".into());
+                return Err("Audio device changed before volume restore".into());
             }
+            // GG may restore its own microphone level while routing. Restore
+            // Jack's saved level against that confirmed value, not the old device's.
+            let expected = if *channel == Channel::Microphone {
+                let observed = current
+                    .volumes
+                    .iter()
+                    .find(|v| v.channel == MixerChannel::Microphone)
+                    .ok_or("Microphone volume disappeared")?
+                    .volume;
+                if (observed - desired).abs() <= 0.000001 {
+                    continue;
+                }
+                observed
+            } else {
+                *previous
+            };
             changed_levels.push((*channel, *previous, *desired));
-            service.volume(*channel, *desired, *previous)?;
+            service.volume(*channel, *desired, expected)?;
         }
         let after = service.read();
         if !after.available()
@@ -212,9 +299,12 @@ fn select_with(
                 })
             })
         {
-            return Err("Group output readback did not match".into());
+            return Err("Audio device/volume readback did not match".into());
         }
         remember(&mut next, &after);
+        // Persistence is part of the same transaction as routing and gain.
+        // A disk error must take the existing rollback path before returning.
+        commit(&next)?;
         Ok(())
     })();
     if let Err(error) = result {
@@ -248,7 +338,7 @@ fn select_with(
         return Err(if recovery.is_empty() {
             error
         } else {
-            format!("{error}; output recovery: {}", recovery.join("; "))
+            format!("{error}; audio recovery: {}", recovery.join("; "))
         });
     }
     Ok(next)
@@ -293,7 +383,7 @@ mod tests {
             .iter()
             .find(|d| d.enabled && d.role == DeviceRole::Playback && d.id != game.device_id)
             .expect("connected alternative output required");
-        let request = select(
+        let request = select_with(
             &mut service,
             &settings,
             Channel::Game,
@@ -321,7 +411,7 @@ mod tests {
                 .iter()
                 .any(|r| r.channel == channel && r.device_id == device.id)
                 && previous.device_id != device.id
-                && let Err(error) = select(
+                && let Err(error) = select_with(
                     &mut service,
                     &settings,
                     channel,
@@ -449,13 +539,16 @@ mod tests {
                         endpoint_id: format!("{channel:?}"),
                     })
                     .collect(),
-                devices: vec![AudioDevice {
-                    id: "new".into(),
-                    name: "Output".into(),
-                    role: DeviceRole::Playback,
-                    enabled: true,
-                    virtual_device: false,
-                }],
+                devices: ["new", "old"]
+                    .into_iter()
+                    .map(|id| AudioDevice {
+                        id: id.into(),
+                        name: "Output".into(),
+                        role: DeviceRole::Playback,
+                        enabled: true,
+                        virtual_device: false,
+                    })
+                    .collect(),
                 ..State::default()
             },
             fail: None,
@@ -526,7 +619,6 @@ mod tests {
         let mut restored: Settings =
             serde_json::from_str(&serde_json::to_string(&next).unwrap()).unwrap();
         restored.link_group_outputs = false;
-        f.state.devices[0].id = "old".into();
         let back = select_with(&mut f, &restored, Channel::Chat, "old", "new").unwrap();
         assert_eq!(f.state.volumes[1].volume, 0.63);
         assert_eq!(f.state.volumes[0].volume, 0.0);
@@ -571,5 +663,86 @@ mod tests {
         f.state.volumes[0].volume = 0.0;
         assert!(!remember(&mut settings, &f.state));
         assert_eq!(settings, before);
+    }
+    #[test]
+    fn disconnected_physical_output_does_not_overwrite_remembered_levels() {
+        let mut f = fixture();
+        let mut settings = Settings::default();
+        assert!(remember(&mut settings, &f.state));
+        let before = settings.clone();
+        f.state
+            .devices
+            .iter_mut()
+            .find(|device| device.id == "old")
+            .unwrap()
+            .enabled = false;
+        f.state
+            .volumes
+            .iter_mut()
+            .for_each(|volume| volume.volume = 0.0);
+        assert!(!remember(&mut settings, &f.state));
+        assert_eq!(settings, before);
+    }
+    #[test]
+    fn microphone_memory_pins_unvisited_inputs_and_restores_zero_independently() {
+        let mut f = fixture();
+        f.state.routes[3].device_id = "mic-old".into();
+        f.state
+            .devices
+            .extend(["mic-old", "mic-new"].into_iter().map(|id| AudioDevice {
+                id: id.into(),
+                name: "Input".into(),
+                role: DeviceRole::Capture,
+                enabled: true,
+                virtual_device: false,
+            }));
+        let mut settings = Settings::default();
+        assert!(remember(&mut settings, &f.state));
+        f.state.volumes[3].volume = 0.0;
+        assert!(remember(&mut settings, &f.state));
+        assert_eq!(settings.microphone_device_volumes["mic-new"], 0.63);
+        let next =
+            select_with(&mut f, &settings, Channel::Microphone, "mic-new", "mic-old").unwrap();
+        assert_eq!(f.state.volumes[3].volume, 0.63);
+        assert_eq!(next.microphone_device_volumes["mic-old"], 0.0);
+        let restored: Settings =
+            serde_json::from_str(&serde_json::to_string(&next).unwrap()).unwrap();
+        select_with(&mut f, &restored, Channel::Microphone, "mic-old", "mic-new").unwrap();
+        assert_eq!(f.state.volumes[3].volume, 0.0);
+        assert!(
+            f.state.routes[..3]
+                .iter()
+                .all(|route| route.device_id == "old")
+        );
+        assert!(
+            f.state.volumes[..3]
+                .iter()
+                .all(|volume| volume.volume == 0.63)
+        );
+    }
+    #[test]
+    fn settings_commit_failure_recovers_routes_and_levels_and_retains_original_memory() {
+        let mut f = fixture();
+        let mut settings = Settings::default();
+        for group in &mut settings.groups {
+            group.device_volumes.insert("new".into(), 0.2);
+        }
+        let original = settings.clone();
+        let mut commits = 0;
+        let error = select_with_commit(&mut f, &settings, Channel::Game, "new", "old", |next| {
+            commits += 1;
+            assert!(
+                next.groups
+                    .iter()
+                    .all(|group| group.device_volumes["old"] == 0.63)
+            );
+            Err("disk full".into())
+        })
+        .unwrap_err();
+        assert_eq!(error, "disk full");
+        assert_eq!(commits, 1);
+        assert!(f.state.routes.iter().all(|route| route.device_id == "old"));
+        assert!(f.state.volumes.iter().all(|volume| volume.volume == 0.63));
+        assert_eq!(settings, original);
     }
 }

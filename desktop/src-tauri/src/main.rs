@@ -88,7 +88,10 @@ async fn audio_action(app: tauri::AppHandle, action: Action) -> Result<ViewState
     }
     let preference_change = matches!(
         action,
-        Action::Preferences { .. } | Action::TrayShortcut { .. } | Action::Reset
+        Action::Preferences { .. }
+            | Action::TrayShortcut { .. }
+            | Action::TrayVolumeNumbers { .. }
+            | Action::Reset
     );
     let next_shortcut = match &action {
         Action::TrayShortcut {

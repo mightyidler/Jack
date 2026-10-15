@@ -25,9 +25,11 @@ desktop/src-tauri/gen/
 !/docs/distribution-status.md
 !/docs/distribution-checklist.md
 !/docs/development.md
+!/docs/release-notes.md
 /driver/
 /tools/*
 !/tools/jack-audio-probe/
 !/tools/verify-gg-setup.ps1
 !/tools/verify-release.mjs
+!/tools/verify-release.test.mjs
 !/tools/collect-licenses.mjs

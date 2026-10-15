@@ -195,7 +195,7 @@ fn verify_to_duration(
         let mut fill = |frames: u32, rendered: &mut u64| -> windows::core::Result<()> {
             let target = render.GetBuffer(frames)?;
             let pcm = std::slice::from_raw_parts_mut(target.cast::<f32>(), frames as usize * 2);
-            for (offset, frame) in pcm.chunks_exact_mut(2).enumerate() {
+            for (offset, frame) in pcm.as_chunks_mut::<2>().0.iter_mut().enumerate() {
                 let index = *rendered as usize + offset;
                 // Preserve the original short fixture; long observations generate
                 // PCM until100ms before the requested end, rather than only800ms.

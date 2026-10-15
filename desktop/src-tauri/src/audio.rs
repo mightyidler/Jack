@@ -68,6 +68,9 @@ pub enum Action {
         key: Option<String>,
         modifiers: u32,
     },
+    TrayVolumeNumbers {
+        enabled: bool,
+    },
     Reset,
     #[serde(skip)]
     InitializeStartup,
@@ -292,7 +295,7 @@ impl Owner {
             ));
         }
         let settings_path = root.join("settings.json");
-        let mut settings = jack_core::settings::load(&settings_path)
+        let mut settings = jack_core::settings::load_recovering(&settings_path)
             .map_err(|e| e.to_string())?
             .settings;
         let launch_command = format!(
@@ -322,7 +325,11 @@ impl Owner {
         })
     }
     fn view(&mut self) -> Reply {
+        self.routes.policy.prune_exited_processes();
         let mut sonar = self.sonar.refresh(false);
+        if self.update_paused {
+            return Ok(self.passive_view(sonar));
+        }
         let mut remembered = self.settings.clone();
         if crate::group_outputs::remember(&mut remembered, &sonar) {
             self.preferences(remembered)?;
@@ -345,15 +352,13 @@ impl Owner {
             // This mirrors an external GG choice; never writes back to GG.
             self.preferences(next)?;
         }
-        if !self.update_paused {
-            self.app_routing.reconcile(
-                &mut self.routes,
-                &mut self.sonar,
-                &self.settings,
-                &audio,
-                &sonar,
-            );
-        }
+        self.app_routing.reconcile(
+            &mut self.routes,
+            &mut self.sonar,
+            &self.settings,
+            &audio,
+            &sonar,
+        );
         // Routing may recreate audio sessions; publish current effective routes.
         if self.app_routing.apps.iter().any(|app| app.pending) {
             sonar = self.sonar.refresh(false);
@@ -388,6 +393,24 @@ impl Owner {
             app_routing: self.app_routing.apps.clone(),
             routing_warnings: self.app_routing.warnings.clone(),
         })
+    }
+    // Shutdown/update recovery has already completed. A UI snapshot must not
+    // reapply rules, save preferences or turn a monitor error into a failed quit.
+    fn passive_view(&mut self, sonar: jack_sonar::State) -> ViewState {
+        let audio = self.monitor.snapshot().unwrap_or_else(|error| Snapshot {
+            endpoints: vec![],
+            sessions: vec![],
+            warnings: vec![error.to_string()],
+            monitor: None,
+        });
+        ViewState {
+            settings: self.settings.clone(),
+            audio,
+            separation_available: sonar.available(),
+            sonar,
+            app_routing: vec![],
+            routing_warnings: self.app_routing.warnings.clone(),
+        }
     }
     fn preferences(&mut self, next: Settings) -> Result<(), String> {
         self.apply_preferences(next, false)
@@ -453,10 +476,15 @@ impl Owner {
                         channel,
                         &device_id,
                         &expected,
+                        |next| {
+                            if next != &self.settings {
+                                jack_core::settings::save(&self.settings_path, next)
+                                    .map_err(|error| error.to_string())?;
+                            }
+                            Ok(())
+                        },
                     )?;
-                    if next != self.settings {
-                        self.preferences(next)?;
-                    }
+                    self.settings = next;
                 } else {
                     self.sonar.execute(command).map_err(|e| e.to_string())?;
                 }
@@ -499,39 +527,58 @@ impl Owner {
                 next.add_sonar_group(name.into(), target)
                     .map_err(|e| e.to_string())?;
                 let channel = crate::sonar_routing::channel(target);
-                if !sonar.sources.iter().any(|source| source.channel == channel) {
-                    self.sonar
-                        .execute(jack_sonar::Command::Source {
-                            channel,
-                            enabled: true,
-                            expected: false,
-                        })
-                        .map_err(|e| e.to_string())?;
-                }
-                let current = self.sonar.refresh(true);
-                let initial_route = initial_group_route(&self.settings, &current, target)?;
-                if let Some((previous, inherited)) = &initial_route {
-                    self.sonar
-                        .execute(jack_sonar::Command::Route {
-                            channel,
-                            device_id: inherited.clone(),
-                            expected: previous.clone(),
-                        })
-                        .map_err(|e| e.to_string())?;
-                }
-                if let Err(error) = self.preferences(next) {
+                let enable_source = !sonar.sources.iter().any(|source| source.channel == channel);
+                let mut initial_route = None;
+                let result = (|| {
+                    if enable_source {
+                        self.sonar
+                            .execute(jack_sonar::Command::Source {
+                                channel,
+                                enabled: true,
+                                expected: false,
+                            })
+                            .map_err(|e| e.to_string())?;
+                    }
+                    let current = self.sonar.refresh(false);
+                    initial_route = initial_group_route(&self.settings, &current, target)?;
+                    if let Some((previous, inherited)) = &initial_route {
+                        self.sonar
+                            .execute(jack_sonar::Command::Route {
+                                channel,
+                                device_id: inherited.clone(),
+                                expected: previous.clone(),
+                            })
+                            .map_err(|e| e.to_string())?;
+                    }
+                    self.preferences(next)
+                })();
+                if let Err(error) = result {
+                    let mut errors = vec![error];
                     if let Some((previous, inherited)) = initial_route
+                        && self
+                            .sonar
+                            .refresh(false)
+                            .routes
+                            .iter()
+                            .any(|route| route.channel == channel && route.device_id == inherited)
                         && let Err(rollback) = self.sonar.execute(jack_sonar::Command::Route {
                             channel,
                             device_id: previous,
                             expected: inherited,
                         })
                     {
-                        return Err(format!(
-                            "{error}; new group output recovery failed: {rollback}"
-                        ));
+                        errors.push(format!("new group output recovery failed: {rollback}"));
                     }
-                    return Err(error);
+                    if enable_source
+                        && let Err(rollback) = self.sonar.execute(jack_sonar::Command::Source {
+                            channel,
+                            enabled: false,
+                            expected: true,
+                        })
+                    {
+                        errors.push(format!("new group channel recovery failed: {rollback}"));
+                    }
+                    return Err(errors.join("; "));
                 }
             }
             Action::RemoveGroup { group_id } => {
@@ -660,6 +707,11 @@ impl Owner {
                 next.startup_preference_initialized = true;
                 self.preferences(next)?;
             }
+            Action::TrayVolumeNumbers { enabled } => {
+                let mut next = self.settings.clone();
+                next.tray_volume_numbers_always_visible = enabled;
+                self.preferences(next)?;
+            }
             Action::TrayShortcut {
                 enabled,
                 key,
@@ -730,9 +782,7 @@ impl Owner {
             Action::Shutdown => {
                 let sonar = self.sonar.refresh(false);
                 self.app_routing.restore_live(&mut self.routes, &sonar)?;
-                // Keep the saved ON preference for next launch without reapplying
-                // rules in the final view after restoring shutdown routes.
-                self.settings.channel_separation_enabled = false;
+                return Ok(self.passive_view(sonar));
             }
         }
         self.view()
@@ -838,7 +888,8 @@ fn synchronized_optional_groups(
     let mut next = settings.clone();
     let mut changed = false;
     // The three built-in groups remain fixed; only Aux mirrors GG add/delete.
-    for target in [OutputChannel::Aux] {
+    {
+        let target = OutputChannel::Aux;
         if !state
             .sources
             .iter()
@@ -854,7 +905,8 @@ fn synchronized_optional_groups(
             changed = true;
         }
     }
-    for target in [OutputChannel::Aux] {
+    {
+        let target = OutputChannel::Aux;
         if state
             .sources
             .iter()

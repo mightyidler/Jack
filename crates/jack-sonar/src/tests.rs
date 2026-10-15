@@ -14,6 +14,7 @@ fn discovery_rejects_external_hosts_credentials_and_alternate_loopback() {
         "http://user:password@localhost:1234",
         "ftp://127.0.0.1",
         "http://localhost:1234/#fragment",
+        "http://localhost:1234/?redirect=https://example.com",
     ] {
         assert!(parse_local_url("http", address).is_err(), "{address}");
     }
@@ -23,6 +24,64 @@ fn discovery_rejects_external_hosts_credentials_and_alternate_loopback() {
         "http://[::1]:1234",
     ] {
         assert!(parse_local_url("http", address).is_ok());
+    }
+}
+
+#[test]
+fn failed_mutations_clear_connected_state_and_allow_recovery_reads_without_replaying() {
+    for live in [false, true] {
+        let mut service = Service::new().unwrap();
+        let server = service.runtime.block_on(async {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/mode"))
+                .respond_with(ResponseTemplate::new(503))
+                .expect(1)
+                .mount(&server)
+                .await;
+            server
+        });
+        service.client = Some(SonarClient::new(url::Url::parse(&server.uri()).unwrap()).unwrap());
+        service.state = State {
+            connection: "connected".into(),
+            mode: Some("classic".into()),
+            volumes: vec![VolumeState {
+                channel: MixerChannel::Game,
+                volume: 0.4,
+                muted: false,
+            }],
+            ..State::default()
+        };
+        let result = if live {
+            service
+                .set_volume_live(MixerChannel::Game, 0.2, 0.4)
+                .map(|_| ())
+        } else {
+            service.execute(Command::Volume {
+                channel: MixerChannel::Game,
+                level: 0.2,
+                expected: 0.4,
+            })
+        };
+        assert!(result.is_err());
+        assert!(service.client.is_none());
+        assert!(!service.state.available());
+        assert!(service.state.volumes.is_empty());
+        assert!(service.state.message.is_some());
+        assert!(service.next_retry <= Instant::now());
+        let options = DiscoveryOptions {
+            core_props: Some(std::env::temp_dir()),
+        };
+        assert_eq!(
+            service.refresh_with_options(false, &options).connection,
+            "disconnected"
+        );
+        let requests = service
+            .runtime
+            .block_on(server.received_requests())
+            .unwrap();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].method, "GET");
     }
 }
 

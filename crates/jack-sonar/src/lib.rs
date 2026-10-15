@@ -110,7 +110,7 @@ impl Service {
             backoff: Duration::from_secs(1),
         })
     }
-    fn failed(&mut self, error: Error) {
+    fn failed(&mut self, error: &Error) {
         let connection = match error {
             Error::SonarDisabled => "disabled",
             Error::SonarNotReady | Error::SonarNotRunning => "waiting",
@@ -152,7 +152,7 @@ impl Service {
                 self.state = state;
                 self.backoff = Duration::from_secs(1);
             }
-            Err(error) => self.failed(error),
+            Err(error) => self.failed(&error),
         }
         self.state.clone()
     }
@@ -193,8 +193,12 @@ impl Service {
             client.set_volume(channel, level).await?;
             Ok(level)
         });
-        if result.as_ref().is_err_and(|e| e.is_stale_connection()) {
-            self.client = None;
+        if let Err(error) = &result
+            && error.is_stale_connection()
+        {
+            self.failed(error);
+            // A caller may need immediate rediscovery for compensating reads
+            // after a partially applied transaction. Never replay the mutation.
             self.next_retry = Instant::now();
         }
         if let Ok(level) = result
@@ -329,8 +333,10 @@ impl Service {
             }
             Ok(())
         });
-        if result.as_ref().is_err_and(|e| e.is_stale_connection()) {
-            self.client = None;
+        if let Err(error) = &result
+            && error.is_stale_connection()
+        {
+            self.failed(error);
             self.next_retry = Instant::now();
         }
         result

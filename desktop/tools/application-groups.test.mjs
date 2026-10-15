@@ -1,9 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { groupApplications } from '../src/application-groups.ts';
+import { groupApplications, partitionApplications } from '../src/application-groups.ts';
 
 const app = (pid, overrides = {}) => ({process_id:pid,process_name:'Player',display_name:'Player',route:'media',activity:'active',routing_error:false,...overrides});
 const identity = (pid, overrides = {}) => ({process_id:pid,stable_id:'path:c:/player.exe',requested:'media',origin:'user',message:null,...overrides});
+
+test('all sessions remain reachable when unassigned, ambiguous, or on a removed channel',()=>{
+  const sessions=[app(1),app(2,{route:'unassigned'}),app(3,{route:'multiple'}),app(4,{route:'aux'})];
+  const before=structuredClone(sessions);
+  const result=partitionApplications(sessions,[],['game','chat','media']);
+  assert.deepEqual(result.channels.get('media').flatMap(group=>group.process_ids),[1]);
+  assert.deepEqual(result.other.flatMap(group=>group.process_ids),[2,3,4]);
+  assert.deepEqual(sessions,before);
+  const pending=partitionApplications([sessions[1]],[identity(2,{pending:true,requested:'chat'})],['chat']);
+  assert.equal(pending.other.length,0);
+  assert.equal(pending.channels.get('chat')[0].session.route,'chat');
+});
 
 test('verified multi-process app renders once and keeps all members without mutating input', () => {
   const sessions = [app(10,{activity:'inactive'}),app(20)];

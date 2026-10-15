@@ -116,7 +116,17 @@ pub struct WindowsAudioPolicy {
     _winrt: WinRtApartment,
     _apartment: Apartment,
 }
+fn prune_bindings(bindings: &mut BTreeMap<String, Vec<ProcessBinding>>) {
+    bindings.retain(|_, group| {
+        group.retain(|process| unsafe { WaitForSingleObject(process.handle, 0) } == WAIT_TIMEOUT);
+        !group.is_empty()
+    });
+}
 impl WindowsAudioPolicy {
+    /// Release handles for exited apps even if that executable is never rebound.
+    pub fn prune_exited_processes(&mut self) {
+        prune_bindings(&mut self.bindings);
+    }
     pub fn new() -> Result<Self, RoutingError> {
         let apartment = Apartment::new().map_err(error)?;
         let winrt = WinRtApartment::new().map_err(error)?;
@@ -412,6 +422,25 @@ impl AudioPolicy for WindowsAudioPolicy {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn pruning_releases_exited_bindings_even_when_the_executable_is_never_rebound() {
+        use windows::{Win32::System::Threading::CreateEventW, core::PCWSTR};
+        // Kernel events model process wait states without starting any apps.
+        let binding = |running: bool| ProcessBinding {
+            pid: 1,
+            handle: unsafe { CreateEventW(None, true, !running, PCWSTR::null()) }.unwrap(),
+            app_id: None,
+        };
+        let mut bindings = BTreeMap::from([
+            ("exited".into(), vec![binding(false)]),
+            ("live".into(), vec![binding(false), binding(true)]),
+        ]);
+        prune_bindings(&mut bindings);
+        assert!(!bindings.contains_key("exited"));
+        assert_eq!(bindings["live"].len(), 1);
+        prune_bindings(&mut bindings);
+        assert_eq!(bindings["live"].len(), 1);
+    }
     #[test]
     fn app_endpoint_codec_is_flow_specific_and_clear_is_explicit() {
         for flow in [Flow::Render, Flow::Capture] {

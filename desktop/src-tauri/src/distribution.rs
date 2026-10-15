@@ -16,7 +16,26 @@ use tauri_plugin_updater::{Update, UpdaterExt};
 pub struct State {
     pending: Mutex<Option<Update>>,
     operation: Mutex<()>,
+    update_operation: tauri::async_runtime::Mutex<()>,
     updating: AtomicBool,
+}
+impl State {
+    fn ensure_setup_allowed(&self) -> Result<(), String> {
+        if self.updating.load(Ordering::Acquire) {
+            return Err("Jack is preparing an update".into());
+        }
+        Ok(())
+    }
+    fn begin_update(&self) -> Result<(), String> {
+        let _setup = self
+            .operation
+            .try_lock()
+            .map_err(|_| "Another setup operation is running")?;
+        self.updating
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .map(|_| ())
+            .map_err(|_| "An update is already being applied".into())
+    }
 }
 
 struct UpdateGuard(tauri::AppHandle);
@@ -109,13 +128,11 @@ fn run_gg(operation: GgOperation, consent: bool) -> Result<serde_json::Value, St
 pub async fn start_gg_for_retry(app: tauri::AppHandle) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<State>();
-        if state.updating.load(Ordering::Acquire) {
-            return Err("Jack is preparing an update".into());
-        }
         let _guard = state
             .operation
             .try_lock()
             .map_err(|_| "Another setup operation is running")?;
+        state.ensure_setup_allowed()?;
         run_gg(GgOperation::Start, false).map(|_| ())
     })
     .await
@@ -138,6 +155,7 @@ pub async fn gg_action(
             .operation
             .try_lock()
             .map_err(|_| "Another setup operation is running")?;
+        state.ensure_setup_allowed()?;
         run_gg(operation, consent)
     })
     .await
@@ -159,7 +177,12 @@ pub async fn check_jack_update(
     if window.label() != "main" {
         return Err("Updates are available in the main window".into());
     }
-    if app.state::<State>().updating.load(Ordering::Acquire) {
+    let state = app.state::<State>();
+    let _operation = state
+        .update_operation
+        .try_lock()
+        .map_err(|_| "Another update operation is running")?;
+    if state.updating.load(Ordering::Acquire) {
         return Err("An update is already being applied".into());
     }
     let update = app
@@ -188,14 +211,12 @@ pub async fn install_jack_update(
     if window.label() != "main" {
         return Err("Updates are available in the main window".into());
     }
-    if app
-        .state::<State>()
-        .updating
-        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-        .is_err()
-    {
-        return Err("An update is already being applied".into());
-    }
+    let state = app.state::<State>();
+    let _operation = state
+        .update_operation
+        .try_lock()
+        .map_err(|_| "Another update operation is running")?;
+    state.begin_update()?;
     let _guard = UpdateGuard(app.clone());
     let update = app
         .state::<State>()
@@ -240,4 +261,26 @@ pub async fn install_jack_update(
         return Err(error.to_string());
     }
     app.restart();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn setup_and_update_exclude_each_other_and_concurrent_checks_are_rejected() {
+        let state = State::default();
+        let setup = state.operation.lock().unwrap();
+        assert!(state.begin_update().is_err());
+        assert!(!state.updating.load(Ordering::Acquire));
+        drop(setup);
+        state.begin_update().unwrap();
+        assert!(state.ensure_setup_allowed().is_err());
+        assert!(state.begin_update().is_err());
+        state.updating.store(false, Ordering::Release);
+        assert!(state.ensure_setup_allowed().is_ok());
+        let check = state.update_operation.try_lock().unwrap();
+        assert!(state.update_operation.try_lock().is_err());
+        drop(check);
+        assert!(state.update_operation.try_lock().is_ok());
+    }
 }

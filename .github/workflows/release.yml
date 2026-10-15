@@ -7,14 +7,10 @@ on:
       tag:
         description: Existing version tag (for example v0.1.0)
         required: true
-      run_checks:
-        description: Run the optional source and unit checks before packaging
-        type: boolean
-        default: false
 permissions:
   contents: write
 concurrency:
-  group: jack-release-${{ github.ref }}
+  group: jack-release
   cancel-in-progress: false
 jobs:
   release:
@@ -22,36 +18,43 @@ jobs:
     env:
       RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ inputs.tag || github.ref }}
-      - uses: actions/setup-node@v4
+          fetch-depth: 0
+      - uses: actions/setup-node@v7.1.0
         with:
-          node-version: '24'
+          node-version-file: '.node-version'
           cache: npm
           cache-dependency-path: desktop/package-lock.json
       - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: '1.95.0'
+          toolchain: '1.99.1'
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2.9.2
       - run: npm ci
         working-directory: desktop
+      - run: npm run build
+        working-directory: desktop
       - run: node tools/verify-release.mjs
+      - run: node tools/verify-release.mjs --preflight
+      - run: node --test tools/verify-release.test.mjs
       - run: cargo fmt --all -- --check
-        if: ${{ inputs.run_checks == true }}
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-        if: ${{ inputs.run_checks == true }}
-      - run: cargo test --workspace
-        if: ${{ inputs.run_checks == true }}
+      - run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - run: cargo test --locked --workspace
       - run: npm test
-        if: ${{ inputs.run_checks == true }}
         working-directory: desktop
       - run: pwsh -NoProfile -File tools/verify-gg-setup.ps1
-        if: ${{ inputs.run_checks == true }}
       - run: node tools/collect-licenses.mjs --check
+      - name: Read release notes
+        id: notes
+        shell: pwsh
+        run: |
+          $notes = Get-Content docs/release-notes.md -Raw
+          @('body<<JACK_RELEASE_NOTES', $notes, 'JACK_RELEASE_NOTES') | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
       - name: Build signed installer and draft release
-        uses: tauri-apps/tauri-action@v0
+        id: build
+        uses: tauri-apps/tauri-action@action-v1.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -63,15 +66,36 @@ jobs:
           # when another commit is pushed while a tagged release is building.
           releaseCommitish: main
           releaseName: Jack ${{ env.RELEASE_TAG }}
-          releaseBody: 'Windows 11 x64용 Jack 배포 후보입니다. SteelSeries GG / Sonar Classic이 필요합니다. 설치·업데이트의 실제 PC 확인은 진행 중입니다. 설치 조건과 제한은 README를 참고하세요.'
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: true
           prerelease: false
-          includeUpdaterJson: true
-          args: --bundles nsis
-      - name: Verify built installer signature and tamper rejection
+          uploadUpdaterJson: true
+          updaterJsonPreferNsis: true
+          args: --bundles nsis -- --locked
+      - name: Verify uploaded draft assets with existing app keys
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: pwsh
         run: |
-          $version = (Get-Content desktop/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
-          $installer = Get-Item "target/release/bundle/nsis/Jack_${version}_x64-setup.exe"
-          cargo run -p jack-desktop --example verify-update -- $installer.FullName
+          $assets = Join-Path $env:RUNNER_TEMP 'jack-draft-assets'
+          gh release download $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --dir $assets --pattern '*.exe' --pattern '*.sig' --pattern latest.json
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node tools/verify-release.mjs --draft $assets
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Publish verified release as latest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --notes-file docs/release-notes.md --draft=false --latest
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify public update endpoint without authentication
+        shell: pwsh
+        run: |
+          $assets = Join-Path $env:RUNNER_TEMP 'jack-public-assets'
+          for ($attempt = 1; $attempt -le 6; $attempt++) {
+            node tools/verify-release.mjs --published $assets
+            if ($LASTEXITCODE -eq 0) { exit 0 }
+            if ($attempt -lt 6) { Start-Sleep -Seconds 10 }
+          }
+          exit 1

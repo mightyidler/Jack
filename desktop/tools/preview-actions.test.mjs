@@ -7,7 +7,7 @@ function fixture() {
   return {
     settings:{theme:'dark',language:'ko',launch_at_login:true,channel_separation_enabled:true,link_group_outputs:true,groups:channels.map(channel=>({id:channel,display_name:channel,sonar_channel:channel}))},
     audio:{endpoints:[],warnings:[]},separation_available:true,
-    sonar:{connection:'connected',message:null,mode:'classic',volumes:[],sources:[],applications:[{process_id:1,process_name:'Player',display_name:'Player',route:'aux',activity:'active',routing_error:false}],
+    sonar:{connection:'connected',message:null,mode:'classic',volumes:[{channel:'microphone',volume:.63,muted:false}],sources:[],applications:[{process_id:1,process_name:'Player',display_name:'Player',route:'aux',activity:'active',routing_error:false}],
       routes:[...channels,'microphone'].map(channel=>({channel,device_id:channel==='microphone'?'mic':'first',device_name:channel})),
       devices:[{id:'second',name:'Headphones',role:'playback',enabled:true},{id:'mic',name:'Microphone',role:'capture',enabled:true}]},
     app_routing:[{process_id:1,stable_id:'player',requested:'aux',origin:'user',pending:false}],
@@ -19,6 +19,20 @@ test('preview linked outputs change together while microphone and original state
   const state=fixture();const before=structuredClone(state);const next=route(state);
   assert.deepEqual(next.sonar.routes.map(route=>route.device_id),['second','second','second','mic']);
   assert.deepEqual(state,before);
+});
+
+test('preview microphone volume memory is independent, preserves zero, and leaves input state intact',()=>{
+  const original=fixture();original.sonar.devices.push({id:'other-mic',name:'Other microphone',role:'capture',enabled:true});
+  const before=structuredClone(original);
+  let state=route(original,'microphone','other-mic','mic');
+  assert.deepEqual(original,before);
+  assert.deepEqual(state.settings.microphone_device_volumes,{mic:.63,'other-mic':.63});
+  state.sonar.volumes[0].volume=0;
+  state=route(state,'microphone','mic','other-mic');
+  assert.equal(state.sonar.volumes[0].volume,.63);
+  state=route(state,'microphone','other-mic','mic');
+  assert.equal(state.sonar.volumes[0].volume,0);
+  assert.deepEqual(state.sonar.routes.slice(0,3).map(value=>value.device_id),['first','first','first']);
 });
 test('preview unlinked outputs and microphone selection stay independent; stale and mismatched devices are rejected',()=>{
   const state=applyPreviewAction(fixture(),{kind:'output_sync',enabled:false},fixture);
@@ -35,6 +49,16 @@ test('preview aux group is bounded and deleting it keeps app assignments consist
   assert.equal(state.settings.groups.length,3);
   assert.equal(state.sonar.applications[0].route,'game');
   assert.equal(state.app_routing[0].requested,'game');
+});
+test('volume number preference survives other preferences and leaves audio intact',()=>{
+  const original=fixture();
+  let state=applyPreviewAction(original,{kind:'tray_volume_numbers',enabled:true},fixture);
+  state=applyPreviewAction(state,{kind:'preferences',theme:'light',language:'en',launch_at_login:false},fixture);
+  assert.equal(state.settings.tray_volume_numbers_always_visible,true);
+  assert.deepEqual(state.sonar,original.sonar);
+  assert.equal(original.settings.tray_volume_numbers_always_visible,undefined);
+  state=applyPreviewAction(state,{kind:'tray_volume_numbers',enabled:false},fixture);
+  assert.equal(state.settings.tray_volume_numbers_always_visible,false);
 });
 test('preview preferences and shortcut are local and reset restores the fixture',()=>{
   let state=applyPreviewAction(fixture(),{kind:'preferences',theme:'light',language:'en',launch_at_login:false},fixture);

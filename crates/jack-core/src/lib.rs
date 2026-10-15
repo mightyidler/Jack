@@ -70,12 +70,17 @@ pub struct TrayShortcut {
 pub struct Settings {
     #[serde(default)]
     pub tray_shortcut: TrayShortcut,
+    #[serde(default)]
+    pub tray_volume_numbers_always_visible: bool,
     pub schema_version: u32,
     /// Persisted preference only. Runtime activation still requires a healthy engine.
     pub channel_separation_enabled: bool,
     /// Link physical output selections without linking channel volumes.
     #[serde(default = "enabled_by_default")]
     pub link_group_outputs: bool,
+    /// Last confirmed microphone level on each physical input (full Sonar device ID).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub microphone_device_volumes: BTreeMap<String, f64>,
     pub launch_at_login: bool,
     #[serde(default)]
     pub startup_preference_initialized: bool,
@@ -95,8 +100,10 @@ impl Default for Settings {
         Self {
             schema_version: SCHEMA_VERSION,
             tray_shortcut: TrayShortcut::default(),
+            tray_volume_numbers_always_visible: false,
             channel_separation_enabled: false,
             link_group_outputs: true,
+            microphone_device_volumes: BTreeMap::new(),
             launch_at_login: true,
             startup_preference_initialized: false,
             theme: Theme::System,
@@ -143,6 +150,15 @@ impl Settings {
     pub fn validate(&self) -> Result<(), ModelError> {
         if self.schema_version != SCHEMA_VERSION {
             return Err(ModelError::Schema(self.schema_version));
+        }
+        if self
+            .microphone_device_volumes
+            .iter()
+            .any(|(device, level)| {
+                device.is_empty() || !level.is_finite() || !(0.0..=1.0).contains(level)
+            })
+        {
+            return Err(ModelError::Volume);
         }
         let mut ids = BTreeSet::new();
         let mut channels = BTreeSet::new();

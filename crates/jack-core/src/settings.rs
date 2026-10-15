@@ -67,6 +67,30 @@ pub fn load(path: &Path) -> Result<LoadedSettings, StoreError> {
     }
 }
 
+/// Recover a validated backup before the owner resumes writes. Preserve the
+/// damaged primary separately, and never rotate it over the usable backup.
+/// Like save(), this requires the caller's exclusive settings lease.
+pub fn load_recovering(path: &Path) -> Result<LoadedSettings, StoreError> {
+    let loaded = load(path)?;
+    if loaded.source == LoadSource::Backup {
+        match fs::read(path) {
+            Ok(bytes) => {
+                let archive = path.with_extension(format!("json.corrupt-{}", uuid::Uuid::new_v4()));
+                let mut file = OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(archive)?;
+                file.write_all(&bytes)?;
+                file.sync_all()?;
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        write_atomic(path, &serde_json::to_vec_pretty(&loaded.settings)?)?;
+    }
+    Ok(loaded)
+}
+
 /// Single-writer store. Sync a same-directory temp file, then atomically replace.
 /// Never overwrite a corrupt primary or a newer schema; load/recovery is explicit.
 pub fn save(path: &Path, settings: &Settings) -> Result<(), StoreError> {
@@ -134,6 +158,79 @@ fn replace(source: &Path, target: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn tray_volume_numbers_default_off_for_legacy_files_and_survive_disk_roundtrip() {
+        let mut legacy = serde_json::to_value(Settings::default()).unwrap();
+        legacy
+            .as_object_mut()
+            .unwrap()
+            .remove("tray_volume_numbers_always_visible");
+        let mut settings: Settings = serde_json::from_value(legacy).unwrap();
+        assert!(!settings.tray_volume_numbers_always_visible);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        settings.tray_volume_numbers_always_visible = true;
+        save(&path, &settings).unwrap();
+        assert!(
+            load(&path)
+                .unwrap()
+                .settings
+                .tray_volume_numbers_always_visible
+        );
+        settings.tray_volume_numbers_always_visible = false;
+        save(&path, &settings).unwrap();
+        assert!(
+            !load(&path)
+                .unwrap()
+                .settings
+                .tray_volume_numbers_always_visible
+        );
+        assert!(!Settings::default().tray_volume_numbers_always_visible);
+    }
+    #[test]
+    fn backup_recovery_preserves_corrupt_bytes_and_allows_future_saves() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let settings = Settings::default();
+        save(&path, &settings).unwrap();
+        save(&path, &settings).unwrap();
+        fs::write(&path, b"broken original").unwrap();
+        let backup = fs::read(backup_path(&path)).unwrap();
+        let loaded = load_recovering(&path).unwrap();
+        assert_eq!(loaded.source, LoadSource::Backup);
+        assert_eq!(read_valid(&path).unwrap(), settings);
+        assert_eq!(fs::read(backup_path(&path)).unwrap(), backup);
+        let archives: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.to_string_lossy().contains(".corrupt-"))
+            .collect();
+        assert_eq!(archives.len(), 1);
+        assert_eq!(fs::read(&archives[0]).unwrap(), b"broken original");
+        let mut next = loaded.settings;
+        next.launch_at_login = !next.launch_at_login;
+        save(&path, &next).unwrap();
+        assert_eq!(load_recovering(&path).unwrap().settings, next);
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 3);
+    }
+    #[test]
+    fn backup_recovery_handles_missing_primary_but_never_downgrades_future_schema() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        save(&backup_path(&path), &Settings::default()).unwrap();
+        assert_eq!(load_recovering(&path).unwrap().source, LoadSource::Backup);
+        assert_eq!(load(&path).unwrap().source, LoadSource::Primary);
+        let mut value = serde_json::to_value(Settings::default()).unwrap();
+        value["schema_version"] = 99.into();
+        let original = value.to_string();
+        fs::write(&path, &original).unwrap();
+        assert!(matches!(
+            load_recovering(&path),
+            Err(StoreError::Model(ModelError::Schema(99)))
+        ));
+        assert_eq!(fs::read_to_string(&path).unwrap(), original);
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 2);
+    }
     #[test]
     fn device_levels_survive_disk_roundtrip_and_legacy_settings_start_empty() {
         let dir = tempfile::tempdir().unwrap();

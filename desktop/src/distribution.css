@@ -1,0 +1,6 @@
+.distribution-settings { display:flex; flex-direction:column; gap:12px; }
+.distribution-info { padding:12px; display:flex; flex-direction:column; gap:8px; }
+.distribution-info .item-hint,.distribution-notice { white-space:normal; overflow-wrap:anywhere; }
+.distribution-notice { padding:0 12px; }
+.distribution-settings>.distribution-settings { margin-top:12px; }
+.distribution-settings .operation:disabled { opacity:.5; }

@@ -1,0 +1,23 @@
+{
+  "source": "PretendardVariable.woff2",
+  "license": "OFL.txt",
+  "method": "fontTools.varLib.instancer.instantiateVariableFont; pin wght; updateFontNames=True",
+  "faces": [
+    {
+      "file": "Pretendard-Light.woff2",
+      "weight": 300
+    },
+    {
+      "file": "Pretendard-Regular.woff2",
+      "weight": 400
+    },
+    {
+      "file": "Pretendard-Medium.woff2",
+      "weight": 500
+    },
+    {
+      "file": "Pretendard-SemiBold.woff2",
+      "weight": 600
+    }
+  ]
+}

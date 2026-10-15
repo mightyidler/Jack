@@ -1,0 +1,16 @@
+/* Bald web/style.css: thumb only, 7px hit area, 3px visible paint, no arrows.
+   Overlay mounting preserves the JSON's symmetric content padding. */
+:root { --scrollbar-home:#ffffff3d; --scrollbar-picker:#ffffff33; }
+:root[data-theme=light] { --scrollbar-home:#0000001f; --scrollbar-picker:#00000014; }
+.content,.menu-viewport,.confirm-scroll { scrollbar-width:none; scrollbar-gutter:auto; overscroll-behavior:contain; overflow-x:hidden; }
+:is(.content,.menu-viewport,.confirm-scroll)::-webkit-scrollbar { display:none; width:0; height:0; }
+.bald-scrollbar { position:absolute; z-index:4; right:0; top:16px; bottom:16px; width:7px; pointer-events:none; }
+.bald-scrollbar[hidden] { display:none; }
+.scrollbar-main { top:124px; bottom:16px; }
+.scrollbar-modal { top:20px; bottom:20px; }
+.bald-scrollbar-thumb { width:7px; min-height:0; border-right:4px solid transparent; background:var(--scrollbar-home); background-clip:padding-box; border-radius:1px 5px 5px 1px / 1px 1px 1px 1px; pointer-events:auto; touch-action:none; cursor:default; }
+
+.scrollbar-main.scrollbar-output { bottom:32px; }
+
+.quick-view,.quick-view body,.quick-view #app { scrollbar-width:none; }
+.quick-view ::-webkit-scrollbar { display:none; width:0; height:0; }

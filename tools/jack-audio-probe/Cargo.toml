@@ -1,0 +1,12 @@
+[package]
+name = "jack-audio-probe"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+jack-windows-audio = { path = "../../crates/jack-windows-audio" }
+serde_json.workspace = true
+uuid.workspace = true
+jack-core = {path = "../../crates/jack-core"}
+jack-sonar = {path = "../../crates/jack-sonar"}

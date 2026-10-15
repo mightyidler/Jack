@@ -1,0 +1,15 @@
+/* Shared text/vector/image rendering policy, including floating top-layer UI.
+   Windows glyph antialiasing is supplied by Chromium/DirectWrite; the smoothing
+   properties below are preferences on platforms that implement them. */
+html,body,#app,#app *,button,input,select,textarea,dialog {
+  -webkit-font-smoothing:antialiased;
+  -moz-osx-font-smoothing:grayscale;
+  text-rendering:optimizeLegibility;
+  font-synthesis:none;
+}
+svg { shape-rendering:geometricPrecision; }
+img,svg,.icon,.preference-check,.preference-chevron { image-rendering:auto; }
+/* Explicit product requirement: retain keyboard focus/navigation semantics,
+   but draw no keyboard/click focus rings, including native top-layer controls. */
+:focus,:focus-visible { outline:none!important; outline-offset:0!important; }
+* { -webkit-tap-highlight-color:transparent; }

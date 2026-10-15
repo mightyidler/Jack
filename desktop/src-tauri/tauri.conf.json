@@ -1,0 +1,88 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Jack",
+  "version": "0.1.0",
+  "identifier": "com.jack.audio",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://127.0.0.1:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label":"tray-menu", "title":"Jack", "url":"index.html?tray-menu",
+        "width":176, "height":88, "decorations":false,
+        "resizable":false, "maximizable":false, "visible":false,
+        "transparent":true, "backgroundColor":"#00000000",
+        "skipTaskbar":true, "alwaysOnTop":true, "shadow":false
+      },
+      {
+        "label": "main",
+        "title": "Jack",
+        "width": 400,
+        "height": 680,
+        "minWidth": 400,
+        "minHeight": 680,
+        "maxWidth": 400,
+        "maxHeight": 680,
+        "decorations": false,
+        "resizable": false,
+        "maximizable": false,
+        "backgroundColor": "#00000000",
+        "visible": false,
+        "transparent": true,
+        "shadow": false
+      },
+      {
+        "label": "quick",
+        "title": "Jack 빠른 제어",
+        "url": "index.html?view=tray",
+        "width": 360,
+        "height": 428,
+        "decorations": false,
+        "resizable": false,
+        "visible": false,
+        "transparent": true,
+        "backgroundColor": "#00000000",
+        "skipTaskbar": true,
+        "alwaysOnTop": true,
+        "shadow": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data: asset: http://asset.localhost; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "createUpdaterArtifacts": true,
+    "licenseFile": "../../LICENSE",
+    "resources": {"../../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md", "../../LICENSE": "LICENSE"},
+    "windows": {
+      "webviewInstallMode": {"type": "downloadBootstrapper", "silent": true},
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["Korean", "English"],
+        "displayLanguageSelector": false,
+        "installerIcon": "icons/icon.ico",
+        "installerHooks": "windows/hooks.nsh",
+        "startMenuFolder": "Jack"
+      }
+    },
+    "icon": [
+      "icons/icon.ico",
+      "icons/32x32.png",
+      "icons/128x128.png"
+    ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDIzRjNGQUYxNTU0MjBFOTUKUldTVkRrSlY4ZnJ6STJKWXo5dlpFUk1wSTY0VkxZeXdwejk3Ri9WRVZva0RIUWJtQk1zK0hBWGQK",
+      "endpoints": ["https://github.com/mightyidler/Jack/releases/latest/download/latest.json"],
+      "windows": {"installMode": "passive"}
+    }
+  }
+}

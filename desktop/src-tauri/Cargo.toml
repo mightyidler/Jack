@@ -1,0 +1,23 @@
+[package]
+name = "jack-desktop"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png", "devtools"] }
+tauri-plugin-single-instance = "2"
+serde.workspace = true
+serde_json.workspace = true
+jack-core = { path = "../../crates/jack-core" }
+jack-windows-audio = { path = "../../crates/jack-windows-audio" }
+jack-sonar = { path = "../../crates/jack-sonar" }
+uuid.workspace = true
+windows = { workspace = true, features = ["Win32_System_Registry", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_System_LibraryLoader", "Win32_UI_Shell", "Win32_UI_Input_KeyboardAndMouse"] }
+image = { version = "0.25", default-features = false, features = ["png", "ico"] }
+base64 = "0.22"
+webview2-com = "0.39.1"
+tauri-plugin-updater = "2"

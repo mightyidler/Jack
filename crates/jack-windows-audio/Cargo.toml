@@ -1,0 +1,18 @@
+[package]
+name = "jack-windows-audio"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+jack-engine = { path = "../jack-engine" }
+jack-core = { path = "../jack-core" }
+uuid.workspace = true
+sha2 = "0.10.9"
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = ["Win32_Security", "Win32_Security_WinTrust", "Win32_Security_Cryptography", "Win32_Security_Cryptography_Catalog", "Win32_Security_Cryptography_Sip", "Win32_Storage_Packaging_Appx", "Win32_Devices_DeviceAndDriverInstallation", "Win32_Devices_Properties", "Win32_System_Registry"] }
+windows-core = "0.62.2"

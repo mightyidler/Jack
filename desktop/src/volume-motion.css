@@ -1,0 +1,26 @@
+/* Paint owns its geometry; the paired control's flex spring preserves the gap. */
+.device-row[role=slider] { overflow:visible; isolation:isolate; background:transparent; box-shadow:none; color:var(--text); }
+.device-row[role=slider]:hover:not(:disabled) { background:transparent; }
+.volume-surface-clip { --clip-left:calc(.01 + var(--pair-left-bleed,var(--volume-left-bleed,0))); --clip-right:calc(.01 + var(--volume-right-bleed,0)); position:absolute; inset:-4% calc(-100% * var(--clip-right)) -4% calc(-100% * var(--clip-left)); overflow:hidden; pointer-events:none; border-radius:inherit; z-index:0; }
+.volume-surface-clip:has(.volume-surface[data-geometry=true]) { border-radius:0; }
+.volume-surface { position:absolute; top:calc(100% * .04 / 1.08); bottom:calc(100% * .04 / 1.08); left:calc(100% * var(--clip-left) / (1 + var(--clip-left) + var(--clip-right))); right:calc(100% * var(--clip-right) / (1 + var(--clip-left) + var(--clip-right))); border-radius:inherit; overflow:hidden; background:var(--volume-track); box-shadow:inset 0 0 0 1px var(--volume-track); transform-origin:var(--volume-origin,50%) center; transform:scaleX(calc(1 + var(--pair-left-scale,var(--volume-x-stretch,0)))) scaleY(var(--volume-scale-y,1)); }
+.volume-surface[data-geometry=true] { border-radius:var(--volume-base-0) var(--volume-base-1) var(--volume-base-2) var(--volume-base-3); }
+.volume-content { position:relative; z-index:1; display:flex; align-items:center; gap:12px; flex:1; min-width:0; }
+.volume-content>.icon { position:relative; z-index:1; }
+.device-row[role=slider] .volume-fill { --volume-color-duration:250ms; transform-origin:left center; will-change:auto; transition:background-color var(--volume-color-duration) ease-in-out; }
+/* The progress box turns blue while held, in BOTH app and tray. Text/icons
+   keep their label color and all existing spring/scale motion stays intact. */
+.device-row[role=slider].adjusting .volume-fill { background:var(--volume-active-fill); }
+.device-row:is(.adjusting,.volume-returning,.volume-changing) .volume-fill { will-change:transform; }
+.sonar-percent { position:absolute; right:0; min-width:4ch; text-align:right; font-variant-numeric:tabular-nums; opacity:0; filter:blur(2px); transform:translateY(2px); pointer-events:none; transition:opacity 150ms ease-in-out,filter 150ms ease-in-out,transform 150ms ease-in-out; }
+.device-row:is(.adjusting,.volume-changing) .sonar-percent { opacity:1; filter:blur(0); transform:translateY(0); }
+.volume-content .device-name { margin-right:0; transition:margin-right 150ms ease-in-out; }
+.device-row:is(.adjusting,.volume-changing) .volume-content .device-name { margin-right:42px; }
+.volume-content .check { transition:opacity 150ms ease-in-out,filter 150ms ease-in-out; }
+.device-row:is(.adjusting,.volume-changing) .volume-content .check { opacity:0; filter:blur(2px); }
+.quick-panel .sonar-percent { position:relative; right:auto; opacity:1; filter:none; transform:none; font-size:15px; line-height:20px; font-weight:400; letter-spacing:-.3px; }
+.quick-panel .volume-content .device-name { margin-right:0; }
+.quick-panel .device-row:is(.adjusting,.volume-changing) .volume-content .check { opacity:1; filter:none; }
+@media(prefers-reduced-motion:reduce) {
+  .device-row[role=slider] .volume-fill,.sonar-percent,.volume-content .device-name,.volume-content .check { transition:none!important; }
+}

@@ -1,0 +1,18 @@
+import {readFileSync} from 'node:fs';
+import assert from 'node:assert/strict';
+const config=JSON.parse(readFileSync('desktop/src-tauri/tauri.conf.json','utf8'));
+const pkg=JSON.parse(readFileSync('desktop/package.json','utf8'));
+const lock=JSON.parse(readFileSync('desktop/package-lock.json','utf8'));
+const cargo=readFileSync('Cargo.toml','utf8');
+const version=cargo.match(/\[workspace\.package\][\s\S]*?^version\s*=\s*"([^"]+)"/m)?.[1];
+assert.equal(pkg.version,config.version);assert.equal(lock.version,config.version);assert.equal(version,config.version);
+assert.equal(lock.packages[''].version,config.version);
+if(process.env.GITHUB_REF_TYPE==='tag')assert.equal(process.env.GITHUB_REF_NAME,`v${config.version}`);
+assert.equal(config.bundle.active,true);assert.equal(config.bundle.createUpdaterArtifacts,true);
+assert.deepEqual(config.bundle.targets,['nsis']);
+assert.ok(config.plugins.updater.pubkey&&!config.plugins.updater.pubkey.includes('PENDING'));
+assert.match(Buffer.from(config.plugins.updater.pubkey,'base64').toString('utf8'),/^untrusted comment: minisign public key:/);
+assert.equal(config.plugins.updater.endpoints[0],'https://github.com/mightyidler/Jack/releases/latest/download/latest.json');
+assert.equal(config.bundle.windows.nsis.installerHooks,'windows/hooks.nsh');
+for(const file of ['LICENSE','THIRD_PARTY_NOTICES.md','desktop/public/assets/LICENSE-sonarctl.txt','desktop/public/assets/LICENSE-sds.txt','desktop/public/assets/fonts/OFL.txt'])assert.ok(readFileSync(file).length);
+console.log(`Jack ${config.version}: versions, updater key, endpoint, installer and licenses verified.`);

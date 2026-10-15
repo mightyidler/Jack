@@ -1,0 +1,46 @@
+/* JSON tray layout: category header44, gap4, device control44, group gap8. */
+.quick-view { background:transparent; --quick-bg:#1d1d1d; --quick-border:var(--surface); --quick-row-hover:#ffffff0f; }
+.quick-view[data-theme=light] { --quick-bg:#f6f6f6; --quick-border:#ffffffb2; --quick-row-hover:#0000000a; }
+.quick-view #app { min-height:0; }
+.quick-shell { position:absolute; left:0; right:0; top:clamp(0px,calc(var(--quick-anchor-y,100dvh) - var(--quick-surface-height,428px) * var(--quick-anchor-origin,1)),max(0px,calc(100% - var(--quick-surface-height,428px)))); padding:20px; width:100%; max-width:360px; background:transparent; }
+.quick-panel { position:relative; border:1px solid var(--quick-border); border-radius:24px; padding:8px; background:var(--quick-bg); box-shadow:0 0 32px #00000029; }
+.quick-viewport { overflow:visible; }
+.quick-content { display:flex; flex-direction:column; gap:8px; }
+.quick-panel .sonar-channels { gap:8px; }
+.quick-panel .sonar-channel { padding:0; box-shadow:none; background:none; }
+.quick-panel .sonar-channel-head { padding:12px; min-height:44px; margin-bottom:4px; }
+.quick-panel .sonar-channel-title .item-title { font-size:15px; line-height:20px; font-weight:400; letter-spacing:-.3px; }
+.quick-panel .sonar-device-control>.device-row { height:44px; min-height:44px; padding:11px 12px; border-radius:16px 4px 4px 16px; }
+.quick-panel .sonar-device-control .device-name { font-size:15px; line-height:20px; font-weight:400; letter-spacing:-.3px; }
+.quick-panel .sonar-device-picker { width:44px; border-radius:4px 16px 16px 4px; }
+.quick-divider { height:1px; background:var(--divider); margin:0 8px; flex:none; }
+/* User correction: round the input header like the tray's other rows. */
+.quick-input-toggle { display:flex; align-items:center; justify-content:space-between; gap:10px; width:100%; padding:8px 12px; font-size:13px; font-weight:400; line-height:16px; letter-spacing:-.26px; color:var(--secondary); border-radius:16px; }
+.quick-input-toggle .t-acc-chevron { flex:none; margin-left:auto; }
+.quick-panel .t-acc-panel-inner>.device-section { padding-top:4px; }
+.quick-panel .device-list { padding:0; border-radius:0; box-shadow:none; background:none; }
+.quick-panel .device-row { min-height:44px; padding:12px; border-radius:16px; }
+.quick-panel .device-section .device-row.selected { min-height:46px; }
+.quick-panel .device-name { font-size:17px; line-height:24px; letter-spacing:-.34px; }
+
+.quick-panel .device-divider { margin-right:12px; margin-left:44px; }
+.quick-panel .device-divider.hidden { margin-right:16px; margin-left:52px; }
+.quick-output-devices { display:flex; flex-direction:column; gap:8px; }
+/* Tray detail / Category Header: radius16, padding12, gap8 in the JSON. */
+.quick-output-back { display:flex; align-items:center; gap:8px; width:100%; padding:12px; border-radius:16px; text-align:left; }
+.quick-input-toggle,.quick-output-back { transition:background-color var(--duration-quick) var(--ease-smooth-out); }
+@media(hover:hover) {
+  .quick-input-toggle:hover:not(:disabled),.quick-output-back:hover:not(:disabled) { background-color:var(--quick-row-hover); }
+}
+@media(prefers-reduced-motion:reduce) {
+  .quick-input-toggle,.quick-output-back { transition:none; }
+}
+.quick-output-back .item-title { font-size:15px; line-height:20px; font-weight:400; letter-spacing:-.3px; }
+.quick-output-devices .device-list { gap:8px; }
+.quick-output-devices .device-name { font-size:15px; line-height:20px; font-weight:400; letter-spacing:-.3px; }
+.quick-output-devices .device-row { color:var(--option-unselected); }
+.quick-output-devices .route-selected { color:var(--option-selected); }
+
+
+
+.quick-panel .sonar-percent { font-size:15px; line-height:20px; font-weight:400; letter-spacing:-.3px; }

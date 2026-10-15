@@ -1,0 +1,49 @@
+/* Bald web/style.css: effective language/theme rows and dropdown cascade. */
+:root { --preference-text:#fff; --preference-secondary:#ffffff99; }
+:root[data-theme=light] { --preference-text:#000; --preference-secondary:#00000099; }
+:root[data-theme=light] .environment { background:#fff; }
+.environment { color:var(--preference-text); border-radius:16px; overflow:hidden; }
+.environment .setting-row { min-height:48px; padding:12px; gap:12px; }
+.environment .item-title { flex-shrink:0; font-weight:400; }
+.environment .setting-divider { margin:0 12px; }
+.dropdown-wrap { min-width:0; }
+.dropdown-trigger {
+  display:flex; align-items:center; gap:4px; max-width:100%; text-align:right;
+  color:var(--select-text); font-family:inherit; font-size:17px; line-height:24px;
+  font-weight:400; letter-spacing:-.34px;
+  transform:scale(1); transition:transform 380ms cubic-bezier(.34,1.56,.64,1),background-color 150ms cubic-bezier(.22,1,.36,1),filter 150ms cubic-bezier(.22,1,.36,1),opacity 150ms ease-out;
+}
+.dropdown-trigger>span:first-child { min-width:0; overflow-wrap:anywhere; }
+.preference-chevron { display:block; width:20px; height:20px; flex:none; background:currentColor; mask:url('/assets/bald/preference-chevron.svg') center/contain no-repeat; transition:transform .22s cubic-bezier(.34,1.3,.64,1); }
+.dropdown-trigger[aria-expanded=true] .preference-chevron { transform:rotate(180deg); }
+.preference-menu {
+  position:fixed; inset:auto; margin:0; z-index:500; min-width:160px; width:max-content; max-width:calc(100vw - 40px);
+  padding:3px; border:0; border-radius:16px; color:var(--preference-text); background:var(--fl-menu-surface);
+  -webkit-backdrop-filter:blur(24px); backdrop-filter:blur(24px); box-shadow:var(--fl-menu-shadow);
+  overflow:clip; opacity:0; transform:scale(.96) translateY(-6px); transform-origin:top right;
+  transition:opacity 150ms cubic-bezier(.22,1,.36,1),transform 250ms cubic-bezier(.22,1,.36,1),display 250ms allow-discrete,overlay 250ms allow-discrete;
+}
+.preference-menu.opens-up { transform:scale(.96) translateY(6px); transform-origin:bottom right; }
+.preference-menu:popover-open { opacity:1; transform:scale(1) translateY(0); }
+@starting-style {
+  .preference-menu:popover-open { opacity:0; transform:scale(.96) translateY(-6px); }
+  .preference-menu.opens-up:popover-open { transform:scale(.96) translateY(6px); }
+}
+.dropdown-item {
+  width:100%; display:flex; align-items:center; justify-content:space-between; gap:12px;
+  height:auto; padding:10px; border-radius:13px; font-size:15px; font-weight:300;
+  line-height:normal; letter-spacing:normal; color:var(--preference-secondary); text-align:left;
+  transform:scale(1); transition:transform 380ms cubic-bezier(.34,1.56,.64,1),background-color 150ms cubic-bezier(.22,1,.36,1),filter 150ms cubic-bezier(.22,1,.36,1),opacity 150ms ease-out;
+}
+.dropdown-item.is-selected { color:var(--preference-text); font-weight:500; }
+.preference-check { flex:none; width:14px; height:14px; opacity:0; background:currentColor; mask:url('/assets/bald/check.svg') center/contain no-repeat; }
+.dropdown-item.is-selected .preference-check { opacity:1; }
+.dropdown-trigger:active,.dropdown-item:active { transition:transform 80ms cubic-bezier(.22,1,.36,1),background-color 150ms cubic-bezier(.22,1,.36,1),filter 150ms cubic-bezier(.22,1,.36,1),opacity 150ms ease-out; }
+.dropdown-trigger:active { transform:scale(.96); }
+.dropdown-item:active { transform:scale(.98); }
+@media(hover:hover) {
+  .dropdown-trigger:hover:enabled { color:var(--preference-text); }
+  .dropdown-item:hover:enabled { background:#ffffff0f; }
+  [data-theme=light] .dropdown-item:hover:enabled { background:#0000000a; }
+}
+@media(prefers-reduced-motion:reduce) { .dropdown-trigger,.preference-chevron,.preference-menu,.dropdown-item { transition:none!important; } }

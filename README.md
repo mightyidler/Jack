@@ -1,6 +1,6 @@
 # Jack
 
-[![Jack 데모 영상](.github/assets/Jack_demo.jpg)](https://github.com/mightyidler/Jack/blob/main/Jack_demo.mp4)
+[![Jack 데모 미리보기 · 클릭하면 고화질 영상 재생](.github/assets/Jack_demo.gif)](https://github.com/mightyidler/Jack/blob/main/Jack_demo.mp4)
 
 [▶ Jack 데모 영상 재생](https://github.com/mightyidler/Jack/blob/main/Jack_demo.mp4)
 

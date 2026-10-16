@@ -1,6 +1,7 @@
 # 배포 상태
 
 - 공개 저장소: https://github.com/mightyidler/Jack
+- 0.1.10 공개 완료(2026-10-16): [릴리즈](https://github.com/mightyidler/Jack/releases/tag/v0.1.10)를 Latest로 지정했다. 앱 태그 커밋은 `ce809d2e83db690423deb863fbd2f8f76dade04c`이며 [배포 작업](https://github.com/mightyidler/Jack/actions/runs/38881970149)의 전체 검사·서명된 설치 파일 생성·초안 검증·공개 다운로드 검증이 통과했다. Apple Music/Apple TV의 패키지 경로별 이름과 공식 아이콘 표시, 비활성 세션의 실행 경로 기반 아이콘 조회를 포함한다. Rust 134개·프런트엔드 27개·배포 회귀 4개 테스트와 fmt/Clippy/TypeScript/프로덕션 CSS/라이선스 검사가 통과했다. 현재 PC에서도 공개 업데이트 정보·익명 다운로드·기존 공개 키 호환·Rust 업데이터 manifest 파싱·설치 파일 서명·변조 거부를 재확인했다. 설치 파일 SHA256: `9aa88dec4081c0d134d687dee14a869b80f04bedd75f7458fe7e3dbebfe00fdc`. 파일은 `artifacts/distribution/v0.1.10`에 보존했다. 0.1.9와 업데이트 공개 키·앱 식별자·설치 모드도 동일하다. 실제 앱 내 업데이트 설치·재시작·오디오 동작은 미확인이다.
 - 0.1.6 공개 완료(2026-10-16): 버전·Cargo/npm lock 동기화, 기존 0.1.4·0.1.5 공개 키·앱 ID·설치 모드 유지 확인. Rust 125개 테스트, 프런트엔드 17개 테스트, 배포 회귀 4개 테스트, fmt/Clippy/TypeScript/프로덕션 CSS/라이선스 검사 통과. 실제 오디오를 조작하는 테스트는 실행하지 않았다.
 - 0.1.5 장애 원인: GitHub 빌드는 성공했지만 릴리즈가 초안으로 남았다. 인증 없는 릴리즈 API와 앱의 `releases/latest/download/latest.json`은 0.1.4를 반환해 기존 0.1.4에서 0.1.5를 발견할 수 없었다. 사용자는 직접 다시 설치했다. CI에 업로드 파일 재검증·정식 공개·Latest 지정·익명 업데이트 경로 검증을 추가했다.
 - 0.1.5 이전 실패 로그도 대조했다. `38710658446`은 태그 v0.1.5와 앱 설정 0.1.4의 불일치, `38711681362`·`38711748554`는 Cargo.lock 불일치로 라이선스 검사에서 중단됐다. 0.1.6은 Cargo/npm 버전과 잠금 파일을 함께 갱신하고 `--locked` 검사·빌드를 필수 실행한다.

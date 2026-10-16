@@ -27,6 +27,8 @@
 
 2026-10-16: [0.1.8 릴리즈](https://github.com/mightyidler/Jack/releases/tag/v0.1.8)를 정식 공개하고 Latest로 지정했다. [배포 작업](https://github.com/mightyidler/Jack/actions/runs/38848977778)의 전체 검사·서명된 설치 파일 생성·초안 검증·공개 다운로드 검증이 통과했다. 이 PC에서도 `node tools/verify-release.mjs --published artifacts/distribution/v0.1.8`로 공개 업데이트 주소, 익명 다운로드, 기존 공개 키 호환성, Rust 업데이터 manifest 파싱, 설치 파일 서명과 변조 거부를 재확인했다. 설치 파일 SHA256은 `86a3a4e9aca6e70d2ab938fce884be114403164a78466079896f611ee2a8560b`이다. 실제 기존 앱에서 0.1.8 업데이트 설치·재시작·오디오 동작은 미확인이다.
 
+2026-10-16: [0.1.10 릴리즈](https://github.com/mightyidler/Jack/releases/tag/v0.1.10)를 정식 공개하고 Latest로 지정했다. [배포 작업](https://github.com/mightyidler/Jack/actions/runs/38881970149)의 전체 검사·서명된 설치 파일 생성·초안 검증·공개 다운로드 검증이 통과했다. 이 PC에서도 `node tools/verify-release.mjs --published artifacts/distribution/v0.1.10`으로 공개 업데이트 주소, 익명 다운로드, 기존 공개 키 호환성, Rust 업데이터 manifest 파싱, 설치 파일 서명과 변조 거부를 재확인했다. 설치 파일 SHA256은 `9aa88dec4081c0d134d687dee14a869b80f04bedd75f7458fe7e3dbebfe00fdc`이다. 실제 기존 앱에서 0.1.10 업데이트 설치·재시작·오디오 동작은 미확인이다.
+
 현재 사용 가능한 PC는 기존 GG가 설치된 한 대다. GG를 제거하거나 별도 Windows 환경을 구성하지 않는다.
 
 ## 실제 확인 절차

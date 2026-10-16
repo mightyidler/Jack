@@ -16,7 +16,9 @@
 .quick-divider { height:1px; background:var(--divider); margin:0 8px; flex:none; }
 /* User correction: round the input header like the tray's other rows. */
 .quick-input-toggle { display:flex; align-items:center; justify-content:space-between; gap:10px; width:100%; padding:8px 12px; font-size:13px; font-weight:400; line-height:16px; letter-spacing:-.26px; color:var(--secondary); border-radius:16px; }
-.quick-input-toggle .t-acc-chevron { flex:none; margin-left:auto; }
+.quick-input-toggle .t-acc-chevron { display:grid; place-items:center; width:16px; height:16px; flex:none; margin-left:auto; transition:transform var(--duration-fast) var(--ease-smooth-out); }
+.quick-input-toggle[aria-expanded=false] .t-acc-chevron { transform:rotate(0deg); }
+.quick-input-toggle[aria-expanded=true] .t-acc-chevron { transform:rotate(180deg); }
 .quick-panel .t-acc-panel-inner>.device-section { padding-top:4px; }
 .quick-panel .device-list { padding:0; border-radius:0; box-shadow:none; background:none; }
 .quick-panel .device-row { min-height:44px; padding:12px; border-radius:16px; }
@@ -34,6 +36,7 @@
 }
 @media(prefers-reduced-motion:reduce) {
   .quick-input-toggle,.quick-output-back { transition:none; }
+  .quick-input-toggle .t-acc-chevron { transition:none; }
 }
 .quick-output-back .item-title { font-size:15px; line-height:20px; font-weight:400; letter-spacing:-.3px; }
 .quick-output-devices .device-list { gap:8px; }

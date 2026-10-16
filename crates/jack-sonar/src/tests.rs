@@ -122,6 +122,21 @@ fn multiple_sessions_for_same_process_remain_ambiguous() {
 }
 
 #[test]
+fn unnamed_representative_keeps_metadata_from_another_current_session() {
+    let payload = json!([
+        {"deviceId":"one","role":"game","dataFlow":"render","audioSessions":[
+            {"processId":123,"processName":"Unknown","state":"active"}]},
+        {"deviceId":"physical","dataFlow":"render","audioSessions":[
+            {"processId":123,"processName":"browser","displayName":"Browser","state":"active"},
+            {"processId":123,"processName":"old","displayName":"Old name","state":"inactive"}]}
+    ]);
+    let result = parse_application_routing(&payload).unwrap();
+    assert_eq!(result.sessions[0].process_name, "browser");
+    assert_eq!(result.sessions[0].display_name, "Browser");
+    assert_eq!(result.sessions[0].route, ApplicationRoute::Multiple);
+}
+
+#[test]
 fn streamer_mode_clears_classic_state_and_blocks_writes() {
     let mut service = Service::new().unwrap();
     let server = service.runtime.block_on(async {

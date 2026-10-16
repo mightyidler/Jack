@@ -32,8 +32,13 @@ if(!dividers.some(match=>/(?:^|;)opacity:0(?:;|$)/.test(match[1]))) {
   throw new Error('Built CSS must hide device dividers using opacity.');
 }
 console.log('Built CSS: divider opacity fade 250ms preserved.');
-for(const [token,expected] of [['--device-text-duration',150],['--device-surface-duration',250],['--volume-settle-time',380],['--volume-status-duration',150],['--volume-number-duration',150]]) {
+for(const [token,expected] of [['--device-text-duration',250],['--device-surface-duration',250],['--volume-settle-time',380],['--volume-status-duration',150],['--volume-number-duration',150]]) {
   const value=css.match(new RegExp(`${token}:([^;}]+)`))?.[1];
   if(cssTimeMs(value??'',NaN)!==expected)throw new Error(`Built CSS ${token} must resolve to ${expected} milliseconds.`);
 }
 console.log('Built CSS: device text/surface transitions, volume settle and status swap timing preserved.');
+const chevronDuration=css.match(/--acc-chevron:([^;}]+)/)?.[1];
+if(cssTimeMs(chevronDuration??'',NaN)!==250 || !/\.t-acc\[data-open=true\] \.t-acc-chevron\{transform:rotate\(180deg\)/.test(css)) {
+  throw new Error('Built CSS input chevron must rotate 180 degrees over 250 milliseconds.');
+}
+console.log(`Built CSS: input chevron ${chevronDuration} resolves to 250ms; device swap uses ${css.match(/--device-text-duration:([^;}]+)/)?.[1]} for both layers.`);

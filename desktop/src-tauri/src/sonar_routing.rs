@@ -2,7 +2,11 @@
 //! The engine/channel state stays in Sonar; only app rules are Jack preferences.
 use jack_core::{AppIdentity, Classification, OutputChannel, Settings, classify, routing::*};
 use jack_sonar::{Command, Service, State, sonar::models::Channel};
-use jack_windows_audio::{Snapshot, identity::process_identity, policy::WindowsAudioPolicy};
+use jack_windows_audio::{
+    Snapshot,
+    identity::{process_executable_path, process_identity},
+    policy::WindowsAudioPolicy,
+};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, Instant};
@@ -59,7 +63,7 @@ mod group_recovery_tests {
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
         let mut routing = AppRouting::default();
-        let identity = routing.identity(pid, &snapshot).unwrap();
+        let identity = routing.identity(pid).unwrap();
         let request = routing.apply(
             &mut routes,
             &mut service,
@@ -259,6 +263,109 @@ mod group_recovery_tests {
         assert_eq!(routes.store.0.changes.len(), 1);
         assert_eq!(routes.store.0.changes[0].key, other.key);
     }
+
+    #[test]
+    fn returning_app_recovers_without_restoring_other_active_owned_routes() {
+        let exited = change("exited", "chat");
+        let active = change("active", "media");
+        let mut routes = RouteController {
+            policy: Policy {
+                values: BTreeMap::from([(active.key.clone(), Some(active.applied.clone()))]),
+                ..Default::default()
+            },
+            store: Store(Journal {
+                changes: vec![exited.clone(), active.clone()],
+                ..Default::default()
+            }),
+        };
+        let mut pending = BTreeSet::from([exited.key.clone()]);
+        recover_pending_routes(&mut routes, &mut pending).unwrap();
+        assert!(pending.contains(&exited.key));
+        assert_eq!(routes.store.0.changes.len(), 2);
+        // The process has rebound even though it has no current app rule.
+        routes
+            .policy
+            .values
+            .insert(exited.key.clone(), Some(exited.applied.clone()));
+        recover_pending_routes(&mut routes, &mut pending).unwrap();
+        assert!(pending.is_empty());
+        assert_eq!(routes.policy.values[&exited.key], None);
+        assert_eq!(routes.policy.values[&active.key], Some(active.applied));
+        assert_eq!(routes.store.0.changes.len(), 1);
+    }
+
+    #[test]
+    fn returning_app_preserves_external_policy_and_failed_recovery_retries() {
+        let owned = change("returning", "chat");
+        let mut routes = RouteController {
+            policy: Policy {
+                values: BTreeMap::from([(owned.key.clone(), Some(owned.applied.clone()))]),
+                reject: true,
+                ..Default::default()
+            },
+            store: Store(Journal {
+                changes: vec![owned.clone()],
+                ..Default::default()
+            }),
+        };
+        let mut pending = BTreeSet::from([owned.key.clone()]);
+        recover_pending_routes(&mut routes, &mut pending).unwrap();
+        assert!(pending.contains(&owned.key));
+        routes.policy.reject = false;
+        routes
+            .policy
+            .values
+            .insert(owned.key.clone(), Some("external".into()));
+        recover_pending_routes(&mut routes, &mut pending).unwrap();
+        assert!(pending.is_empty());
+        assert!(routes.store.0.changes.is_empty());
+        assert_eq!(
+            routes.policy.values[&owned.key].as_deref(),
+            Some("external")
+        );
+    }
+
+    #[test]
+    fn live_identity_does_not_require_an_audio_session_and_revalidates_cache() {
+        let pid = std::process::id();
+        let mut routing = AppRouting::default();
+        let identity = routing.identity(pid).unwrap();
+        assert!(identity.executable_name.is_some());
+        routing.identities.get_mut(&pid).unwrap().0 = "stale-session-path".into();
+        assert_eq!(routing.identity(pid).unwrap().stable_id, identity.stable_id);
+        assert_ne!(routing.identities[&pid].0, "stale-session-path");
+    }
+
+    #[test]
+    fn inventory_resolves_unknown_label_and_removes_confirmed_exited_process() {
+        use jack_sonar::sonar::models::{
+            ApplicationActivity, ApplicationRoute, ApplicationSession,
+        };
+        use std::os::windows::process::CommandExt;
+        let mut child = std::process::Command::new("cmd.exe")
+            .args(["/C", "exit", "0"])
+            .creation_flags(0x08000000)
+            .spawn()
+            .unwrap();
+        let exited = child.id();
+        child.wait().unwrap();
+        let session = |pid| ApplicationSession {
+            process_id: pid,
+            process_name: "Unknown".into(),
+            display_name: String::new(),
+            route: ApplicationRoute::Unassigned,
+            activity: ApplicationActivity::Inactive,
+            routing_error: false,
+        };
+        let mut state = State {
+            applications: vec![session(std::process::id()), session(exited)],
+            ..State::default()
+        };
+        AppRouting::default().refresh_inventory(&mut state);
+        assert_eq!(state.applications.len(), 1);
+        assert!(!state.applications[0].display_name.is_empty());
+        assert_eq!(state.applications[0].process_name, "Unknown");
+    }
 }
 #[derive(Default)]
 pub struct AppRouting {
@@ -269,6 +376,7 @@ pub struct AppRouting {
     pub warnings: Vec<String>,
     // Retained only for ownership recovery while GG is unavailable, never for writes.
     source_ids: BTreeMap<Channel, BTreeSet<String>>,
+    recovery_keys: BTreeSet<RouteKey>,
 }
 pub fn output(channel: Channel) -> Result<OutputChannel, String> {
     Ok(match channel {
@@ -333,13 +441,40 @@ fn restore_group_routes<P: AudioPolicy, S: JournalStore>(
     Ok(())
 }
 impl AppRouting {
-    pub fn identity(&mut self, pid: u32, snapshot: &Snapshot) -> Result<AppIdentity, String> {
-        let path = snapshot
-            .sessions
-            .iter()
-            .find(|s| s.pid == pid)
-            .and_then(|s| s.executable_path.clone())
-            .ok_or("Cannot verify the executable of this audio session")?;
+    /// Sonar can retain dead sessions and omit process labels. Keep inaccessible
+    /// live apps visible, but discard only processes Windows confirms have exited.
+    pub fn refresh_inventory(&mut self, sonar: &mut State) {
+        sonar
+            .applications
+            .retain_mut(|app| match process_executable_path(app.process_id) {
+                Ok(path) => {
+                    if (app.process_name.trim().is_empty()
+                        || app.process_name.eq_ignore_ascii_case("unknown"))
+                        && (app.display_name.trim().is_empty()
+                            || app.display_name.eq_ignore_ascii_case("unknown"))
+                        && let Some(name) = std::path::Path::new(&path).file_stem()
+                    {
+                        app.display_name = name.to_string_lossy().into_owned();
+                    }
+                    true
+                }
+                Err(error) => !matches!(error.code(), code if
+                    code == windows::Win32::Foundation::ERROR_INVALID_PARAMETER.to_hresult()
+                    || code == windows::Win32::Foundation::ERROR_PROCESS_ABORTED.to_hresult()),
+            });
+    }
+
+    pub fn remember_recovery(&mut self, report: &RecoveryReport) {
+        self.recovery_keys
+            .extend(report.pending.iter().map(|pending| pending.key.clone()));
+    }
+
+    pub fn identity(&mut self, pid: u32) -> Result<AppIdentity, String> {
+        // Session caches can lag process start/exit and PID reuse. Always check
+        // the live executable before reusing the expensive publisher identity.
+        let path = process_executable_path(pid).map_err(|error| {
+            format!("Cannot verify the executable of this audio session: {error}")
+        })?;
         if let Some((cached, identity)) = self.identities.get(&pid)
             && cached == &path
         {
@@ -370,6 +505,7 @@ impl AppRouting {
         let report = routes
             .restore_keys_best_effort(&keys)
             .map_err(|e| e.to_string())?;
+        self.remember_recovery(&report);
         if !report.complete {
             return Err(report
                 .pending
@@ -404,7 +540,7 @@ impl AppRouting {
             .filter(|pid| *pid != 0)
             .collect::<BTreeSet<_>>()
         {
-            let Ok(identity) = self.identity(pid, snapshot) else {
+            let Ok(identity) = self.identity(pid) else {
                 continue;
             };
             let requested = settings
@@ -425,6 +561,16 @@ impl AppRouting {
             }
         }
         let sources = self.source_ids.get(&target).cloned().unwrap_or_default();
+        self.recovery_keys.extend(
+            routes
+                .store
+                .load()
+                .map_err(|e| e.to_string())?
+                .changes
+                .iter()
+                .filter(|change| sources.contains(&change.applied) || keys.contains(&change.key))
+                .map(|change| change.key.clone()),
+        );
         restore_group_routes(routes, &sources, &keys)?;
         // Exited apps remain journaled and recover on their next session or Jack startup.
         Ok(())
@@ -526,6 +672,40 @@ impl AppRouting {
     ) {
         self.apps.clear();
         self.warnings.clear();
+        // Rebind independently of classification. A restarted app may no longer
+        // have a rule or appear in GG, but its old undo record still needs recovery.
+        let journal = match routes.store.load() {
+            Ok(journal) => journal,
+            Err(error) => {
+                self.warnings
+                    .push(format!("Cannot read app recovery journal: {error}"));
+                return;
+            }
+        };
+        self.recovery_keys.extend(
+            journal
+                .changes
+                .iter()
+                .filter(|change| {
+                    change.phase != Phase::Applied || routes.policy.read(&change.key).is_err()
+                })
+                .map(|change| change.key.clone()),
+        );
+        if !journal.changes.is_empty() {
+            for pid in snapshot
+                .sessions
+                .iter()
+                .map(|session| session.pid)
+                .chain(sonar.applications.iter().map(|app| app.process_id))
+                .filter(|pid| *pid != 0)
+                .collect::<BTreeSet<_>>()
+            {
+                let _ = routes.policy.bind_process(pid);
+            }
+        }
+        if let Err(error) = recover_pending_routes(routes, &mut self.recovery_keys) {
+            self.warnings.push(error);
+        }
         for source in &sonar.sources {
             self.source_ids
                 .entry(source.channel)
@@ -553,7 +733,7 @@ impl AppRouting {
                 message: None,
                 icon_data_url: None,
             };
-            let identity = match self.identity(app.process_id, snapshot) {
+            let identity = match self.identity(app.process_id) {
                 Ok(identity) => identity,
                 Err(e) => {
                     view.message = Some(e);
@@ -622,6 +802,12 @@ impl AppRouting {
                 }
             };
             let keys = app_keys(&binding);
+            if keys.iter().any(|key| self.recovery_keys.contains(key)) {
+                view.message =
+                    Some("Previous app policy recovery is pending; retrying automatically".into());
+                self.apps.push(view);
+                continue;
+            }
             let journal = match routes.store.load() {
                 Ok(j) => j,
                 Err(e) => {
@@ -711,15 +897,21 @@ impl AppRouting {
         }
         match routes.store.load() {
             Ok(journal) => {
-                let pending = journal
+                let pending: BTreeSet<_> = journal
                     .changes
                     .iter()
                     .filter(|change| {
-                        change.phase != Phase::Applied || routes.policy.read(&change.key).is_err()
+                        self.recovery_keys.contains(&change.key)
+                            || change.phase != Phase::Applied
+                            || routes.policy.read(&change.key).is_err()
                     })
-                    .count();
-                if pending > 0 {
-                    self.warnings.push(format!("{pending} app policies await recovery; exited apps recover when they start again"));
+                    .map(|change| match &change.key {
+                        RouteKey::App { stable_app_id, .. } => stable_app_id.clone(),
+                        RouteKey::Default { .. } => "Windows defaults".into(),
+                    })
+                    .collect();
+                if !pending.is_empty() {
+                    self.warnings.push(format!("{} apps await policy recovery; recovery retries automatically when their audio sessions return", pending.len()));
                 }
             }
             Err(error) => self
@@ -732,9 +924,24 @@ impl AppRouting {
         let report = routes
             .restore_keys_best_effort(&app_keys(&binding).into_iter().collect())
             .map_err(|e| e.to_string())?;
+        self.remember_recovery(&report);
         if !report.complete {
             return Err("App policy recovery pending".into());
         }
         Ok(())
     }
+}
+
+fn recover_pending_routes<P: AudioPolicy, S: JournalStore>(
+    routes: &mut RouteController<P, S>,
+    pending: &mut BTreeSet<RouteKey>,
+) -> Result<(), String> {
+    if pending.is_empty() {
+        return Ok(());
+    }
+    let report = routes
+        .restore_keys_best_effort(pending)
+        .map_err(|error| error.to_string())?;
+    *pending = report.pending.into_iter().map(|entry| entry.key).collect();
+    Ok(())
 }

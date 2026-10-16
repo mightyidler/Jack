@@ -288,12 +288,7 @@ impl Owner {
         }
         let report = routes.restore_best_effort().map_err(|e| e.to_string())?;
         let mut app_routing = crate::sonar_routing::AppRouting::default();
-        if !report.complete {
-            app_routing.warnings.push(format!(
-                "{} app policies will recover when those apps start",
-                report.pending.len()
-            ));
-        }
+        app_routing.remember_recovery(&report);
         let settings_path = root.join("settings.json");
         let mut settings = jack_core::settings::load_recovering(&settings_path)
             .map_err(|e| e.to_string())?
@@ -335,6 +330,7 @@ impl Owner {
             self.preferences(remembered)?;
         }
         let audio = self.monitor.snapshot().map_err(|e| e.to_string())?;
+        self.app_routing.refresh_inventory(&mut sonar);
         if let Some(next) = synchronized_optional_groups(&self.settings, &sonar)? {
             for group in &self.settings.groups {
                 if !next.groups.iter().any(|remaining| remaining.id == group.id)
@@ -362,6 +358,7 @@ impl Owner {
         // Routing may recreate audio sessions; publish current effective routes.
         if self.app_routing.apps.iter().any(|app| app.pending) {
             sonar = self.sonar.refresh(false);
+            self.app_routing.refresh_inventory(&mut sonar);
             for app in &mut self.app_routing.apps {
                 if app.pending
                     && sonar.applications.iter().any(|a| {
@@ -654,8 +651,7 @@ impl Owner {
                 {
                     return Err("Audio session changed; refresh before assigning".into());
                 }
-                let snapshot = self.monitor.snapshot().map_err(|e| e.to_string())?;
-                let identity = self.app_routing.identity(process_id, &snapshot)?;
+                let identity = self.app_routing.identity(process_id)?;
                 let mut next = self.settings.clone();
                 self.app_routing.allow(&identity.stable_id);
                 if let Some(channel) = channel {

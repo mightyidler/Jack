@@ -183,7 +183,7 @@ async function act(action: Record<string, unknown>) {
       if((action.kind==='tray_volume_numbers' || action.kind==='reset') && parent!==window)parent.postMessage({type:'jack-preview-volume-numbers',enabled:!!state.settings.tray_volume_numbers_always_visible},location.origin);
     } else state = await invoke<ViewState>('audio_action',{action});
   }
-  catch (e) { error = String(e); showToast(error,7000); if (native) try { state = await invoke<ViewState>('audio_action',{action:{kind:'read'}}); } catch { /* preserve the original error */ } }
+  catch (e) { error = String(e); showToast(error); if (native) try { state = await invoke<ViewState>('audio_action',{action:{kind:'read'}}); } catch { /* preserve the original error */ } }
   finally { busy = false; render(); if (focusId) document.getElementById(focusId)?.focus(); }
 }
 function updateDisabled() { app.querySelectorAll<HTMLButtonElement | HTMLSelectElement>('[data-control]').forEach(el => {
@@ -251,10 +251,6 @@ function render() {
     if (!state.separation_available) content.append(sonarConnection());
     else if (tab === 'capture') content.append(deviceList('capture'));
     else content.append(sonarChannels());
-  }
-  if(state?.routing_warnings?.length) {
-    const warning=element('p','item-hint',state.routing_warnings.join('\n'));
-    warning.role='status';content.append(warning);
   }
   frame.append(content);
   if (!native && params.get('fixture') !== 'design') frame.append(element('p','preview-label',m.preview));
@@ -352,7 +348,7 @@ function renderSettings(content: HTMLElement) {
   numbersToggle.id='tray-volume-numbers-toggle';numbersToggle.setAttribute('aria-describedby',numbersHint.id);numbersRow.append(numbersDescription,numbersToggle);
   envCard.append(selectRow(m.language,'language-select',['ko','en'],['한국어','English'],s.language,v => preferences({language:v})),element('div','setting-divider'),selectRow(m.theme,'theme-select',['system','light','dark'],[m.system,m.light,m.dark],s.theme,v => preferences({theme:v as Theme})),element('div','setting-divider'),numbersRow); env.append(envCard);
   const ops = element('div','card operations'); const reset = control(button(m.reset,'operation danger',resetDialog)); reset.id = 'reset-button';
-  const quit = button(m.quit,'operation',() => { if (native && !busy) void invoke('quit').catch(e => { error = String(e); showToast(error,7000); render(); }); }); quit.disabled = !native; ops.append(reset,element('div','setting-divider'),quit); content.append(startup,shortcuts,env,updateSection(english,native,render,()=>state?.settings.language==='en'),ops);
+  const quit = button(m.quit,'operation',() => { if (native && !busy) void invoke('quit').catch(e => { error = String(e); showToast(error); render(); }); }); quit.disabled = !native; ops.append(reset,element('div','setting-divider'),quit); content.append(startup,shortcuts,env,updateSection(english,native,render,()=>state?.settings.language==='en'),ops);
 }
 function shortcutLabel(shortcut:TrayShortcut,english:boolean) {
   if(!shortcut.key)return english?'Set shortcut':'단축키 지정';
@@ -498,7 +494,11 @@ function sonarChannels(showApplications = true) {
   if (showApplications) {
     const routing = state!.app_routing ?? [];
     for (const entry of routing) routingByProcess.set(entry.process_id,entry);
-    const partition=partitionApplications(sonar.applications,routing,groups.map(group=>group.channel));
+    // Unidentified sessions are internal inventory entries, not useful app controls.
+    const applications=sonar.applications.filter(session =>
+      routingByProcess.get(session.process_id)?.stable_id ||
+      [session.display_name,session.process_name].some(name => name.trim() && !/^unk(?:nown|own)$/i.test(name.trim())));
+    const partition=partitionApplications(applications,routing,groups.map(group=>group.channel));
     applicationsByChannel=partition.channels;otherApplications=partition.other;
   }
   for (const group of groups) {
@@ -524,10 +524,19 @@ function sonarChannels(showApplications = true) {
       const row = control(button('','device-row selected',() => {})); row.id = `sonar-volume-${channel}`;
       row.dataset.deviceMotionKey=JSON.stringify(['output',channel]);
       row.dataset.endpoint=route?.device_id??'';
+      row.dataset.deviceMotionOrder=JSON.stringify(sonar.devices.filter(device=>device.role==='playback' && device.enabled).map(device=>device.id));
       row.disabled ||= !outputAvailable;
       const name = route?.device_name ?? (english ? 'Output disconnected' : '출력 장치 연결 해제');
       const fill = element('span','volume-fill'); fill.style.width = `${level * 100}%`;
-      row.append(fill,playbackIcon(name),element('span','device-name',deviceLabel(name)),element('span','sonar-percent',`${Math.round(level * 100)}%`));
+      const deviceIcon=playbackIcon(name),deviceName=element('span','device-name',deviceLabel(name));
+      if(!quick) {
+        const drum=element('span','device-drum'),face=element('span','device-drum-face');
+        face.append(deviceIcon,deviceName);drum.append(face);row.append(fill,drum);
+        row.dataset.deviceDrumItems=JSON.stringify(sonar.devices.filter(device=>device.role==='playback' && device.enabled).map(device=>({
+          id:device.id,label:deviceLabel(device.name),icon:playbackIcon(device.name).dataset.iconAsset!,
+        })));
+      } else row.append(fill,deviceIcon,deviceName);
+      row.append(element('span','sonar-percent',`${Math.round(level * 100)}%`));
       if (!native && import.meta.env.DEV && params.has('live-volume')) row.disabled = !outputAvailable;
       bindVolume(row,fill,{id:channel,name:labels[channel],flow:'render',form_factor:null,defaults:[],volume:{level,muted:volume?.muted ?? false}},channel);
       const deviceControl=element('div','sonar-device-control');deviceControl.append(row);card.append(deviceControl);
@@ -664,9 +673,6 @@ function sonarApplication(application: ApplicationGroup, labels: Record<MixerCha
   const name = session.display_name || session.process_name;
   const meta=routingByProcess.get(session.process_id);
   const info=element('div','sonar-app-info');info.append(element('span','device-name',name));
-  info.title = `${session.process_name} (${application.process_ids.join(', ')})`;
-  const message=[...new Set(application.process_ids.map(pid=>routingByProcess.get(pid)?.message).filter(Boolean))].join('\n');
-  if(message) {info.title+=`\n${message}`;info.append(element('span','item-hint',message));}
   const programIcon=element('img','sonar-app-icon');programIcon.alt='';programIcon.width=programIcon.height=24;programIcon.draggable=false;
   let iconSource: string | null | undefined;
   for (const pid of application.process_ids) {
@@ -838,7 +844,7 @@ function bindVolume(row: HTMLButtonElement, fill: HTMLElement, device: Endpoint,
         (state.settings.microphone_device_volumes??={})[device.id]=actual;
       }
       return actual;
-    },failure=>{error=String(failure);showToast(error,7000);});
+    },failure=>{error=String(failure);showToast(error);});
     if(held){row.classList.add('adjusting');void holdFluidVolume(row,true);motion.grab();}
   };
   const end=async(flush:boolean)=>{
@@ -915,7 +921,7 @@ const refresh=singleFlight(async (force = false) => {
       ]) : '';
       if (visible(next) !== visible(state)) { state = next; render(); void reportNative().catch(e => { error = String(e); render(); }); }
     }
-  } catch (e) { if (requestedRevision === revision) { const message=String(e);if(state&&error!==message)showToast(message,7000);error=message;render(); } }
+  } catch (e) { if (requestedRevision === revision) { const message=String(e);if(state&&error!==message)showToast(message);error=message;render(); } }
 });
 function fixture(): ViewState {
   const names = ['Razer BlackShark V2 Pro','LG TV SSCR2(NVIDIA High Definition Audio)','Sony WH-1000XM6','Speaker'];
@@ -1018,7 +1024,7 @@ if (params.has('tray-menu')) {
       if(state)state.settings=event.payload;
       theme();if(!busy)render();
     });
-    void listen<string>('jack-error',e => { error = e.payload; showToast(error,7000); render(); });
+    void listen<string>('jack-error',e => { error = e.payload; showToast(error); render(); });
     void listen<boolean>('jack-visibility',e => { visible = e.payload; if (quick) document.documentElement.dataset.popupOpen=String(visible); if (!visible) cancelDrag?.(); if (visible) void refresh(); });
     void listen<QuickLayout>('jack-popup-layout',e=>{if(quick)applyQuickLayout(e.payload);});
     void listen('jack-popup-hidden',()=>{if(quick && !visible){quickOutputGroup=null;renderQuick();}});

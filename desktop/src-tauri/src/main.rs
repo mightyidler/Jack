@@ -83,6 +83,22 @@ fn ui_ready(
 
 #[tauri::command]
 async fn audio_action(app: tauri::AppHandle, action: Action) -> Result<ViewState, String> {
+    // WebViews may invoke IPC while setup is still registering managed state.
+    // TrayLabels is registered after the broker and shortcut state are ready.
+    if app.try_state::<TrayLabels>().is_none() {
+        let starting = app.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            for _ in 0..500 {
+                if starting.try_state::<TrayLabels>().is_some() {
+                    return Ok(());
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err("Jack initialization did not finish; restart Jack".to_string())
+        })
+        .await
+        .map_err(|error| error.to_string())??;
+    }
     if matches!(action, Action::SonarRetry) {
         distribution::start_gg_for_retry(app.clone()).await?;
     }

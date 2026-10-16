@@ -62,6 +62,8 @@ export class QuickSurface {
       const bodyFrom=body.offsetHeight;
       const inner=body.firstElementChild as HTMLElement;
       const wasOpen=body.closest('.t-acc')?.getAttribute('data-open')==='true';
+      const arrow=body.closest('.t-acc')?.querySelector<HTMLElement>('.t-acc-chevron');
+      if(arrow)arrow.style.transform=`rotateZ(${wasOpen?180:0}deg)`;
       // Freeze the existing appearance while measuring the FINAL disclosure
       // layout. CSS grid and a second height transition must not race this one.
       inner.style.opacity=wasOpen?'1':'0';
@@ -76,17 +78,31 @@ export class QuickSurface {
         if(!this.reduced()) {
           // Assign exactly the same start time to all lanes, including height.
           const options=this.options;
-          await this.play([
+          const animations=[
             this.stage.animate([{height:`${from}px`},{height:`${to}px`}],options),
             body.animate([{height:`${bodyFrom}px`},{height:`${bodyTo}px`}],options),
             inner.animate([{opacity:wasOpen?1:0,filter:wasOpen?'blur(0px)':'blur(2px)'},{opacity:open?1:0,filter:open?'blur(0px)':'blur(2px)'}],options),
-          ]);
+          ];
+          if(arrow) {
+            const tokens=getComputedStyle(arrow);
+            animations.push(arrow.animate([
+              {transform:`rotateZ(${wasOpen?180:0}deg)`},
+              {transform:`rotateZ(${open?180:0}deg)`},
+            ],{
+              duration:cssTimeMs(tokens.getPropertyValue('--duration-fast'),250),
+              easing:tokens.getPropertyValue('--ease-smooth-out').trim() || 'cubic-bezier(.22,1,.36,1)',
+              fill:'forwards',
+            }));
+          }
+          await this.play(animations);
         }
       } finally {
         body.style.height=`${bodyTo}px`;
         inner.style.opacity=open?'1':'0';
         inner.style.filter=open?'blur(0px)':'blur(2px)';
+        if(arrow)arrow.style.transform=`rotateZ(${open?180:0}deg)`;
         await this.settle(to);
+        arrow?.style.removeProperty('transform');
         body.style.removeProperty('height');
         inner.style.removeProperty('opacity');
         inner.style.removeProperty('filter');
@@ -216,7 +232,9 @@ export class QuickSurface {
       page.removeAttribute('aria-hidden');
       page.inert=false;
       if(!this.reduced(animate))animateDividerOpacity(page,dividerOpacity);
-      if(!this.reduced(animate))animateDeviceChange(page,devicePaint);
+      // Tray navigation already has a page slide. In-place updates may fade,
+      // but device labels/icons must never use the main window's vertical push.
+      if(!this.reduced(animate))animateDeviceChange(page,devicePaint,{slide:false});
       if(transition) {
         page.dataset.animating='true';previous!.dataset.animating='true';
         const animations: Animation[]=[];

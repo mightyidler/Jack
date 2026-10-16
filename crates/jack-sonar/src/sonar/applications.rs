@@ -176,16 +176,27 @@ fn collapse_process(candidates: Vec<Candidate>) -> Option<ApplicationSession> {
 
     Some(ApplicationSession {
         process_id: representative.session.process_id?,
-        process_name: representative
-            .session
-            .process_name
-            .clone()
-            .filter(|name| !name.trim().is_empty())
+        process_name: current
+            .iter()
+            .find_map(|candidate| {
+                candidate
+                    .session
+                    .process_name
+                    .as_ref()
+                    .filter(|name| !name.trim().is_empty() && !name.eq_ignore_ascii_case("unknown"))
+            })
+            .cloned()
             .unwrap_or_else(|| "Unknown".to_string()),
-        display_name: representative
-            .session
-            .display_name
-            .clone()
+        display_name: current
+            .iter()
+            .find_map(|candidate| {
+                candidate
+                    .session
+                    .display_name
+                    .as_ref()
+                    .filter(|name| !name.trim().is_empty())
+            })
+            .cloned()
             .unwrap_or_default(),
         route,
         activity: representative.activity,

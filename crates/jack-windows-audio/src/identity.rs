@@ -21,6 +21,32 @@ impl Drop for Process {
 }
 pub fn process_identity(pid: u32) -> windows::core::Result<AppIdentity> {
     let process = Process(unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid)? });
+    let path = executable_path(&process)?;
+    identity_from_process(&process, path)
+}
+
+/// Query the live process independently of Core Audio's cached session inventory.
+pub fn process_executable_path(pid: u32) -> windows::core::Result<String> {
+    let process = Process(unsafe {
+        OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
+            false,
+            pid,
+        )?
+    });
+    let status = unsafe { WaitForSingleObject(process.0, 0) };
+    if status == WAIT_OBJECT_0 {
+        return Err(windows::core::Error::from_hresult(
+            ERROR_PROCESS_ABORTED.to_hresult(),
+        ));
+    }
+    if status != WAIT_TIMEOUT {
+        return Err(windows::core::Error::from_thread());
+    }
+    executable_path(&process)
+}
+
+fn executable_path(process: &Process) -> windows::core::Result<String> {
     let mut path = vec![0u16; 32768];
     let mut length = path.len() as u32;
     unsafe {
@@ -31,7 +57,10 @@ pub fn process_identity(pid: u32) -> windows::core::Result<AppIdentity> {
             &mut length,
         )?;
     }
-    let path = String::from_utf16_lossy(&path[..length as usize]);
+    Ok(String::from_utf16_lossy(&path[..length as usize]))
+}
+
+fn identity_from_process(process: &Process, path: String) -> windows::core::Result<AppIdentity> {
     let mut app_id = vec![0u16; 1024];
     let mut app_len = app_id.len() as u32;
     let status = unsafe {

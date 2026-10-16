@@ -1,8 +1,8 @@
 # Jack
 
-[![Jack 데모 미리보기 · 클릭하면 고화질 MP4 다운로드](.github/assets/Jack_demo.gif)](https://raw.githubusercontent.com/mightyidler/Jack/main/Jack_demo.mp4)
+[<img src=".github/assets/Jack_demo_preview.gif" alt="Jack 데모 미리보기 · 클릭하면 전체 영상 보기" width="640">](https://github.com/mightyidler/Jack/blob/main/Jack_demo.mp4)
 
-[고화질 데모 MP4 다운로드 · 2160×2160 / 60fps](https://raw.githubusercontent.com/mightyidler/Jack/main/Jack_demo.mp4)
+[▶ 전체 데모 영상 보기 · 2160×2160 / 60fps](https://github.com/mightyidler/Jack/blob/main/Jack_demo.mp4)
 
 Windows 11용 오디오 제어 앱입니다. SteelSeries GG의 Sonar Classic에 연결하여 그룹별 볼륨·출력 장치·앱 배정과 마이크를 제어합니다.
 

@@ -1,0 +1,57 @@
+<!doctype html>
+<!-- Open on the running Vite preview:
+ /tools/app-drag-edge-ui.html?sonar&fixture=design&interactive&grouped-apps&groups=4&theme=dark&fps=60
+ Hold the test button. ?fps=144 exercises 432 frames; theme=light checks light paint.
+ Add direction=up to hold just below the header, starting at the bottom.
+ This test page is not a production build entry point. -->
+<html lang="ko"><head><meta charset="utf-8"><title>Jack drag edge regression</title></head>
+<body><div id="app"></div><aside><button id="run">Hold bottom edge</button><pre id="result">Ready</pre></aside>
+<script type="module" src="/src/main.ts"></script>
+<style>body{background:#111!important}.window{width:400px;height:680px;right:auto;bottom:auto}aside{position:fixed;left:12px;top:120px;max-width:360px;z-index:10001}#run{background:#333;padding:16px;border-radius:12px}pre{white-space:pre-wrap}</style>
+<script type="module">
+// A real held mouse press supplies pointer capture. Advance 3s of real-DOM
+// animation frames explicitly so an inactive preview's 1Hz RAF throttle cannot
+// prevent the pointer from reaching the bottom. Native audio is never involved.
+const button=document.querySelector('#run'),result=document.querySelector('#result');
+const upwards=new URLSearchParams(location.search).get('direction')==='up';
+if(upwards)button.textContent='Hold below header';
+button.addEventListener('pointerdown',event=>{
+  if(event.button!==0)return;
+  const row=document.querySelector('#sonar-app-102'),panel=document.querySelector('#panel');
+  if(!row||!panel)return;
+  if(upwards)panel.scrollTop=panel.scrollHeight;
+  const start=row.getBoundingClientRect(),bounds=panel.getBoundingClientRect();
+  const headerBottom=document.querySelector('.header').getBoundingClientRect().bottom;
+  const x=start.left+start.width/2,y=upwards?headerBottom+2:bounds.bottom-2;
+  const send=(type,px,py)=>row.dispatchEvent(new PointerEvent(type,{pointerId:event.pointerId,isPrimary:true,pointerType:'mouse',button:0,buttons:type==='pointerup'?0:1,clientX:px,clientY:py,bubbles:true}));
+  const nativeRAF=window.requestAnimationFrame,nativeCancel=window.cancelAnimationFrame;
+  const pending=new Map();let nextId=1000000;
+  window.requestAnimationFrame=callback=>{pending.set(++nextId,callback);return nextId;};
+  window.cancelAnimationFrame=id=>{pending.delete(id);};
+  const frames=[],started=performance.now();let now=started;
+  try {
+    send('pointerdown',x,start.top+start.height/2);send('pointermove',x,y);
+    const requestedHz=Number(new URLSearchParams(location.search).get('fps')??60);
+    const hz=[60,120,144].includes(requestedHz)?requestedHz:60;
+    for(let tick=0;tick<3*hz;tick++) {
+      now+=1000/hz;
+      for(const animation of document.getAnimations()) {
+        if(animation.playState==='running')animation.currentTime=Number(animation.currentTime??0)+1000/hz;
+      }
+      const callbacks=[...pending.values()];pending.clear();callbacks.forEach(callback=>callback(now));
+    const slot=panel.querySelector('.app-drop-slot');
+    frames.push({time:now-started,top:panel.scrollTop,range:panel.scrollHeight-panel.clientHeight,target:slot?.closest('.sonar-channel')?.dataset.channel??null,slots:panel.querySelectorAll('.app-drop-slot').length});
+    }
+    const settled=frames.filter(frame=>frame.time>1600);
+    let reversals=0,switches=0;
+    for(let i=1;i<settled.length;i++){
+      if(upwards?settled[i].top>settled[i-1].top+.75:settled[i].top<settled[i-1].top-.75)reversals++;
+      if(settled[i].target!==settled[i-1].target)switches++;
+    }
+    const spread=Math.max(...settled.map(frame=>frame.top))-Math.min(...settled.map(frame=>frame.top));
+    const arrived=upwards?settled.every(frame=>frame.top<1):settled.every(frame=>frame.target==='aux'&&frame.slots===1);
+    result.textContent=JSON.stringify({pass:reversals===0&&switches===0&&spread<1&&arrived,direction:upwards?'up':'down',headerBottom,pointerY:y,frames:frames.length,reversals,switches,settledSpread:spread,last:frames.at(-1)},null,2);
+    send('pointerup',x,y);
+  } finally {window.requestAnimationFrame=nativeRAF;window.cancelAnimationFrame=nativeCancel;}
+});
+</script></body></html>

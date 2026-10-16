@@ -17,11 +17,9 @@ export class SlidingTabs {
     this.pill = pill;
     const measure = () => {
       const selected = rail.querySelector<HTMLElement>('[aria-selected=true]')!;
-      const railRect = rail.getBoundingClientRect();
-      const selectedRect = selected.getBoundingClientRect();
-      const scale = railRect.width / parseFloat(getComputedStyle(rail).width);
-      this.target[0] = (selectedRect.left - railRect.left) / scale;
-      this.target[1] = selectedRect.width / scale;
+      // Press scaling changes painted bounds; the pill follows layout bounds.
+      this.target[0] = selected.offsetLeft;
+      this.target[1] = parseFloat(getComputedStyle(selected).width);
       if (!this.initialized) {
         this.position = [...this.target]; this.initialized = true;
       }

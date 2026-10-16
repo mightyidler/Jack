@@ -1,0 +1,14 @@
+:root {
+  --output-group-open-duration:400ms;
+  --output-group-close-duration:350ms;
+  --output-group-fade-duration:150ms;
+  --output-group-ease:cubic-bezier(0.22,1,0.36,1);
+}
+/* Animate layout height without cropping the child's slide, fade or blur. */
+.output-group-slot { flex:none; min-height:0; overflow:visible; }
+.output-group-slot> :is(.sonar-channel,.sonar-group-add) { width:100%; }
+.output-group-slot[data-output-group-exit] { pointer-events:none; }
+.content.render:has(.output-group-slot) { overflow-anchor:none; }
+@media(prefers-reduced-motion:reduce) {
+  .output-group-slot { will-change:auto; }
+}

@@ -68,7 +68,7 @@ button:disabled,select:disabled { cursor:default; }
 .title { font-size:15px; font-weight:600; line-height:16px; letter-spacing:-.3px; }
 .tagline { font-size:12px; font-weight:400; line-height:16px; letter-spacing:-.24px; color:var(--hint); }
 .window-actions { display:flex; gap:12px; }
-.window-button { display:grid; place-items:center; width:32px; height:32px; padding:6px; border-radius:99px; background:var(--raised); }
+.window-button { display:grid; place-items:center; width:32px; height:32px; padding:6px; border-radius:99px; background:var(--raised); transition:transform var(--duration-fast) var(--ease-smooth-out),background-color var(--duration-quick) var(--ease-smooth-out); }
 .window-button>.icon,.sonar-output-open>.icon { color:var(--chrome-icon); }
 .icon { display:block; flex:none; max-width:none; pointer-events:none; background-color:currentColor; mask-repeat:no-repeat; mask-position:center; mask-size:contain; }
 .chevron-right { transform:rotate(-90deg); }
@@ -76,7 +76,7 @@ button:disabled,select:disabled { cursor:default; }
 /* Same native radius and inset border paint as the audio group cards. */
 .tabs { position:relative; display:flex; padding:4px; border-radius:var(--card-radius); background:var(--navbar); height:36px; box-shadow:inset 0 0 0 1px var(--group-surface); }
 .tab-indicator { position:absolute; top:4px; bottom:4px; border-radius:20px; background:var(--tab-selected); pointer-events:none; }
-.tab { position:relative; flex:1; min-width:0; padding:4px 12px; border-radius:20px; color:var(--inactive); font-size:15px; font-weight:500; line-height:20px; letter-spacing:-.15px; white-space:nowrap; transition:color var(--duration-quick) ease-in-out; }
+.tab { position:relative; flex:1; min-width:0; padding:4px 12px; border-radius:20px; color:var(--inactive); font-size:15px; font-weight:500; line-height:20px; letter-spacing:-.15px; white-space:nowrap; transition:transform var(--duration-fast) var(--ease-smooth-out),color var(--duration-quick) ease-in-out; }
 .tab[aria-selected=true] { color:var(--text); }
 .scroll-edge { position:absolute; z-index:1; top:0; left:0; width:100%; height:68px; pointer-events:none; background:transparent; opacity:.9; mask-image:url('/assets/figma/header-mask.svg'); mask-size:100% 68px; -webkit-backdrop-filter:blur(30px); backdrop-filter:blur(30px); }
 .content { position:absolute; inset:0; padding:108px 12px 12px; overflow:auto; }
@@ -96,7 +96,7 @@ button:disabled,select:disabled { cursor:default; }
 .shortcut-divider { height:1px; flex:none; background:var(--divider); }
 .shortcut-choice { display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .shortcut-label { flex:none; color:var(--secondary); font-size:15px; line-height:20px; letter-spacing:-.3px; font-weight:500; }
-.shortcut-capture { display:grid; grid-template-columns:minmax(0,1fr); align-items:start; justify-items:center; flex:0 1 auto; width:auto; max-width:100%; min-width:36px; min-height:36px; padding:8px 10px; border-radius:18px; background:var(--control-soft); box-shadow:inset 0 0 0 1px var(--divider); color:var(--text); font-size:15px; line-height:20px; font-weight:500; letter-spacing:-.3px; text-align:center; transition:background-color 200ms ease-in-out,color 200ms ease-in-out; }
+.shortcut-capture { display:grid; grid-template-columns:minmax(0,1fr); align-items:start; justify-items:center; flex:0 1 auto; width:auto; max-width:100%; min-width:36px; min-height:36px; padding:8px 10px; border-radius:18px; background:var(--control-soft); box-shadow:inset 0 0 0 1px var(--divider); color:var(--text); font-size:15px; line-height:20px; font-weight:500; letter-spacing:-.3px; text-align:center; transition:transform var(--duration-fast) var(--ease-smooth-out),background-color 200ms ease-in-out,color 200ms ease-in-out; }
 .shortcut-capture { --shortcut-text-duration:120ms; --shortcut-resize-duration:160ms; --shortcut-text-blur:2px; }
 .shortcut-value { grid-area:1/1; align-self:start; min-width:0; max-width:none; white-space:pre; overflow-wrap:normal; pointer-events:none; }
 .shortcut-capture:active:enabled { background:var(--raised); }
@@ -181,10 +181,17 @@ select { appearance:none; min-width:44px; padding:0; border:0; background:transp
 .sonar-app-info { min-width:0; flex:1; }
 .sonar-app-info .device-name { display:block; }
 .sonar-app-icon { width:24px; height:24px; flex:none; }
-.sonar-app-divider { height:1px; background:var(--divider); flex:none; }
-.sonar-group-remove { display:grid; place-items:center; width:28px; height:28px; padding:6px; flex:none; border-radius:14px; background:var(--control-soft); color:var(--secondary); }
-.sonar-group-add { display:flex; align-items:center; justify-content:center; gap:6px; width:100%; padding:12px; border-radius:24px; background:var(--accent-soft); color:var(--accent); font-size:17px; font-weight:600; line-height:24px; letter-spacing:-.34px; }
+.sonar-app-divider { height:1px; margin-left:44px; margin-right:0; background:var(--divider); flex:none; }
+.sonar-group-remove { display:grid; place-items:center; width:28px; height:28px; padding:6px; flex:none; border-radius:14px; background:var(--control-soft); color:var(--secondary); transition:transform var(--duration-fast) var(--ease-smooth-out); }
+.sonar-group-add { display:flex; align-items:center; justify-content:center; gap:6px; width:100%; padding:12px; border-radius:24px; background:var(--accent-soft); color:var(--accent); font-size:17px; font-weight:600; line-height:24px; letter-spacing:-.34px; transition:transform var(--duration-fast) var(--ease-smooth-out),background-color var(--duration-quick) var(--ease-smooth-out); }
 .sonar-group-add:disabled { opacity:.5; }
+/* Keep masked icons centered on one composited surface throughout a press. */
+.window-button,.sonar-group-remove { position:relative; transform:scale(1); transform-origin:center; will-change:transform; }
+.window-button>.icon,.sonar-group-remove>.icon { position:absolute; inset:0; margin:auto; }
+/* Match the preference trigger: quick press, smooth return on release. */
+:is(.window-button,.tab,.shortcut-capture,.sonar-group-add,.sonar-group-remove):active:enabled { transform:scale(.98); transition-duration:var(--duration-press),var(--duration-quick),var(--duration-quick); }
+.window-button:active:enabled,.sonar-group-remove:active:enabled { transform:scale(.96); }
+@media(prefers-reduced-motion:reduce) { .window-button,.tab,.shortcut-capture,.sonar-group-add,.sonar-group-remove { transition:none!important; } }
 .asset-sheet { padding:20px; display:flex; flex-wrap:wrap; gap:16px; }
 .asset-cell { width:160px; height:100px; padding:12px; border:1px solid #555; display:flex; flex-direction:column; gap:16px; }
 @media(hover:hover) {

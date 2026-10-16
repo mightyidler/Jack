@@ -37,11 +37,16 @@ for(const [token,expected] of [['--device-text-duration',250],['--device-surface
   if(cssTimeMs(value??'',NaN)!==expected)throw new Error(`Built CSS ${token} must resolve to ${expected} milliseconds.`);
 }
 console.log('Built CSS: device text/surface transitions, volume settle and status swap timing preserved.');
-for(const [token,expected] of [['--input-selection-duration',250],['--input-check-duration',250],['--input-status-duration',150]]) {
+for(const [token,expected] of [['--input-selection-duration',250],['--input-check-duration',250],['--input-status-duration',150],['--app-group-duration',350],['--app-motion-fast',250],['--app-motion-quick',150]]) {
   const value=css.match(new RegExp(`${token}:([^;}]+)`))?.[1];
   if(cssTimeMs(value??'',NaN)!==expected)throw new Error(`Built CSS ${token} must resolve to ${expected} milliseconds.`);
 }
-console.log('Built CSS: input selection travel, check draw and status timing preserved.');
+console.log('Built CSS: input selection and app group/landing timing preserved (350ms/250ms/150ms).');
+for(const [token,expected] of [['--output-group-open-duration',400],['--output-group-close-duration',350],['--output-group-fade-duration',150]]) {
+  const value=css.match(new RegExp(`${token}:([^;}]+)`))?.[1];
+  if(cssTimeMs(value??'',NaN)!==expected)throw new Error(`Built CSS ${token} must resolve to ${expected} milliseconds.`);
+}
+console.log('Built CSS: output group presence and button fade timing preserved.');
 const chevronDuration=css.match(/--acc-chevron:([^;}]+)/)?.[1];
 if(cssTimeMs(chevronDuration??'',NaN)!==250 || !/\.t-acc\[data-open=true\] \.t-acc-chevron\{transform:rotate\(180deg\)/.test(css)) {
   throw new Error('Built CSS input chevron must rotate 180 degrees over 250 milliseconds.');

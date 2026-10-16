@@ -1,11 +1,12 @@
-:root{--resize-dur:300ms;--resize-ease:cubic-bezier(0.22,1,0.36,1);--app-motion-fast:250ms;--app-motion-quick:150ms;--app-motion-ease:cubic-bezier(0.22,1,0.36,1)}
+:root{--resize-dur:300ms;--resize-ease:cubic-bezier(0.22,1,0.36,1);--app-motion-fast:250ms;--app-motion-quick:150ms;--app-group-duration:350ms;--app-lift-scale:1.05;--app-lift-shadow:0 12px 28px #0005;--app-motion-ease:cubic-bezier(0.22,1,0.36,1)}
 .t-resize {
   transition:
     width  var(--resize-dur) var(--resize-ease),
     height var(--resize-dur) var(--resize-ease);
   will-change: width, height;
 }
-.sonar-app{user-select:none;touch-action:none;cursor:grab;outline:none;transition:background var(--app-motion-quick) var(--app-motion-ease)}
+.sonar-app{--app-lift-duration:var(--app-motion-quick);user-select:none;touch-action:none;cursor:grab;outline:none;transform-origin:var(--app-lift-origin,center);transition:background var(--app-motion-quick) var(--app-motion-ease),opacity var(--app-motion-quick) var(--app-motion-ease),scale var(--app-lift-duration) var(--app-motion-ease),box-shadow var(--app-lift-duration) var(--app-motion-ease)}
+.sonar-app.app-pressed{--app-lift-duration:var(--app-motion-fast);scale:var(--app-lift-scale);background:var(--app-row-active);box-shadow:var(--app-lift-shadow)}
 .sonar-app[aria-disabled=true]{cursor:default}
 .sonar-app:focus{outline:none}
 .sonar-app:hover:not([aria-disabled=true]){background:var(--app-row-active)}
@@ -13,15 +14,20 @@
 .sonar-app-handle .icon{pointer-events:none}
 .app-dragging button:focus,.app-dragging .sonar-app:focus{outline:none}
 .app-dragging,.app-dragging *{cursor:grabbing!important;user-select:none!important}
-.app-drag-source{opacity:.2}
-.app-drag-ghost{position:fixed;left:0;top:0;z-index:10000;pointer-events:none;margin:0;background:var(--app-row-active);box-shadow:0 12px 28px #0005;border:0;outline:none;border-radius:8px;will-change:transform;transform-origin:top left}
+.app-dragging .content{overflow-anchor:none;scroll-behavior:auto}
+.sonar-channels{overflow-anchor:none}
+.app-drag-source{display:none}
+.app-drag-returning{visibility:hidden}
+.app-transfer-arrival{position:relative;z-index:2}
+.app-drag-ghost{position:fixed;left:0;top:0;z-index:10000;pointer-events:none;margin:0;background:var(--app-row-active);box-shadow:var(--app-lift-shadow);scale:var(--app-lift-scale);border:0;outline:none;border-radius:8px;will-change:transform,scale}
 :root[data-theme=light] .app-drag-ghost{background:#e5e5e5}
 .app-drop-slot{height:40px;pointer-events:none}
 .sonar-app-list:empty{margin-top:0}
+.sonar-app-list:not(:has(.sonar-app:not(.app-drag-source),.app-drop-slot)){margin-top:0}
 .sonar-app-icon{object-fit:contain;background:none!important;border-radius:0!important;pointer-events:none}
 @media (prefers-reduced-motion: reduce) {
   .t-resize { transition: none !important; }
-  .sonar-app{transition:none!important}
+  .sonar-app{transition:none!important;scale:1!important}
 }
 
 .app-drop-target,.app-drop-slot{outline:none}

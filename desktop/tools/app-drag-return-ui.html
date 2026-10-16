@@ -1,0 +1,45 @@
+<!doctype html>
+<!-- Running Vite: /tools/app-drag-return-ui.html?sonar&fixture=design&interactive&grouped-apps&theme=dark
+ Hold the button to test a cancelled drag's first painted frame and handoff. -->
+<html lang="ko"><head><meta charset="utf-8"><title>Jack drag return regression</title></head>
+<body><div id="app"></div><aside><button id="run">Return from empty area</button><pre id="result">Ready</pre></aside>
+<script type="module" src="/src/main.ts"></script>
+<style>body{background:#111!important}.window{width:400px;height:680px;right:auto;bottom:auto}aside{position:fixed;left:12px;top:120px;max-width:360px;z-index:10001}#run{background:#333;padding:12px;border-radius:12px}pre{white-space:pre-wrap}</style>
+<script type="module">
+const button=document.querySelector('#run'),result=document.querySelector('#result');
+button.addEventListener('pointerdown',async event=>{
+  if(event.button!==0)return;
+  const pid=new URLSearchParams(location.search).get('app')??'102';
+  const source=document.getElementById(`sonar-app-${pid}`),panel=document.querySelector('#panel');
+  if(!source||!panel)return;
+  const origin=source.getBoundingClientRect(),label=document.querySelector('.sonar-channels>.section-label').getBoundingClientRect();
+  const x=origin.left+origin.width/2,y=label.top+label.height/2;
+  const send=type=>source.dispatchEvent(new PointerEvent(type,{pointerId:event.pointerId,isPrimary:true,pointerType:'mouse',button:0,buttons:type==='pointerup'?0:1,clientX:type==='pointerdown'?origin.left+origin.width/2:x,clientY:type==='pointerdown'?origin.top+origin.height/2:y,bubbles:true}));
+  const raf=window.requestAnimationFrame,cancel=window.cancelAnimationFrame,pending=new Map();let id=1000000,now=performance.now();
+  window.requestAnimationFrame=callback=>{pending.set(++id,callback);return id;};window.cancelAnimationFrame=key=>pending.delete(key);
+  const step=async()=>{
+    now+=1000/60;
+    for(const animation of document.getAnimations())if(animation.playState==='running')animation.currentTime=Number(animation.currentTime??0)+1000/60;
+    const callbacks=[...pending.values()];pending.clear();callbacks.forEach(callback=>callback(now));
+    await Promise.resolve();await Promise.resolve();
+  };
+  const box=node=>{const r=node.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height};};
+  const samples=[];
+  const sample=()=>{
+    const row=document.getElementById(`sonar-app-${pid}`),ghost=document.querySelector('.app-drag-ghost'),style=getComputedStyle(row);
+    samples.push({row:box(row),visible:style.display!=='none'&&style.visibility!=='hidden'&&Number(style.opacity)>.001,ghost:ghost?box(ghost):null});
+  };
+  try {
+    send('pointerdown');send('pointermove');
+    for(let tick=0;tick<24;tick++)await step();
+    const releasedAt=box(document.querySelector('.app-drag-ghost'));
+    send('pointerup');sample();
+    for(let tick=0;tick<60;tick++){await step();sample();}
+    const topLeftFrames=samples.filter(frame=>frame.visible&&frame.row.x<30&&frame.row.y<30).length;
+    const duplicateFrames=samples.filter(frame=>frame.visible&&frame.ghost).length;
+    const first=samples[0],last=samples.at(-1);
+    const departureJump=first.ghost?Math.hypot(first.ghost.x-releasedAt.x,first.ghost.y-releasedAt.y):Infinity;
+    result.textContent=JSON.stringify({pass:topLeftFrames===0&&duplicateFrames===0&&departureJump<1&&last.visible&&!last.ghost,topLeftFrames,duplicateFrames,departureJump,releasedAt,first,last},null,2);
+  } finally {window.requestAnimationFrame=raf;window.cancelAnimationFrame=cancel;}
+});
+</script></body></html>

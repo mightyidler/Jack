@@ -4,7 +4,10 @@ import { listen } from '@tauri-apps/api/event';
 import './style.css';
 import './accordion.css';
 import { partitionApplications, type ApplicationGroup } from './application-groups';
+import { ApplicationOrder, applicationOrderKey } from './application-order';
 import { bindAppDrag } from './app-drag';
+import { captureAppGroups, animateAppGroups } from './app-group-motion';
+import { OutputGroupMotion } from './output-group-motion';
 import { LiveVolume } from './live-volume';
 import { singleFlight } from './single-flight';
 import { deviceLabel } from './device-name';
@@ -59,6 +62,13 @@ const params = new URLSearchParams(location.search);
 const interactivePreview = !native && import.meta.env.DEV && params.has('interactive');
 const controlsAvailable = native || interactivePreview;
 const quick = params.get('view') === 'tray';
+const applicationOrderStorage=native?'jack.application-order.v1':'jack.preview.application-order.v1';
+const applicationOrder=new ApplicationOrder((()=>{
+  try {return localStorage.getItem(applicationOrderStorage);}catch{return null;}
+})());
+function saveApplicationOrder() {
+  try {localStorage.setItem(applicationOrderStorage,applicationOrder.serialize());}catch{/* Keep the current session order when storage is unavailable. */}
+}
 document.documentElement.classList.toggle('quick-view',quick);
 if (quick) document.documentElement.dataset.popupOpen=String(!native);
 document.documentElement.classList.add('fastlane');
@@ -88,6 +98,7 @@ let inputExpanded = import.meta.env.DEV && params.has('expanded');
 let quickOutputGroup: OutputGroup | null = null;
 let dismissOutputMenu: (() => void) | null = null;
 const slidingTabs = new SlidingTabs();
+const outputGroupMotion = new OutputGroupMotion();
 let disposeScrollbars: (() => void)[] = [];
 let quickSurface: QuickSurface | null = null;
 let quickPreparationKey='';
@@ -171,6 +182,7 @@ async function act(action: Record<string, unknown>) {
   revision++;
   const focusId = (document.activeElement as HTMLElement)?.id;
   busy = true; error = ''; updateDisabled();
+  let succeeded=true;
   if(action.kind==='sonar_retry') {
     const retry=app.querySelector<HTMLButtonElement>('[data-sonar-retry]');
     if(retry) {
@@ -185,8 +197,9 @@ async function act(action: Record<string, unknown>) {
       if((action.kind==='tray_volume_numbers' || action.kind==='reset') && parent!==window)parent.postMessage({type:'jack-preview-volume-numbers',enabled:!!state.settings.tray_volume_numbers_always_visible},location.origin);
     } else state = await invoke<ViewState>('audio_action',{action});
   }
-  catch (e) { error = String(e); showToast(error); if (native) try { state = await invoke<ViewState>('audio_action',{action:{kind:'read'}}); } catch { /* preserve the original error */ } }
-  finally { busy = false; render(); if (focusId) document.getElementById(focusId)?.focus(); }
+  catch (e) { succeeded=false; error = String(e); showToast(error); if (native) try { state = await invoke<ViewState>('audio_action',{action:{kind:'read'}}); } catch { /* preserve the original error */ } }
+  finally { busy = false; render(); if (focusId) document.getElementById(focusId)?.focus({preventScroll:true}); }
+  return succeeded;
 }
 function updateDisabled() { app.querySelectorAll<HTMLButtonElement | HTMLSelectElement>('[data-control]').forEach(el => {
   if (el.id === 'group-add') {
@@ -222,6 +235,8 @@ function render() {
   const focused = (document.activeElement as HTMLElement)?.id;
   const oldFrame=app.querySelector<HTMLElement>('.window');
   const oldPanel = document.getElementById('panel');
+  const outputGroupsPaint=outputGroupMotion.capture(oldPanel?.classList.contains(tab)?oldPanel:null);
+  const appGroups=captureAppGroups(oldPanel?.classList.contains(tab)?oldPanel:null);
   const dividerOpacity=captureDividerOpacity(oldPanel);
   const devicePaint=captureDevicePaint(oldPanel?.classList.contains(tab)?oldPanel:null);
   const inputSelection=captureInputSelection(oldPanel?.classList.contains(tab)?oldPanel:null);
@@ -236,8 +251,8 @@ function render() {
   const windowActions = element('div','window-actions');
   const minimize = button('','window-button',() => { if (native) void invoke('minimize_window'); }); minimize.setAttribute('aria-label',m.minimize); minimize.append(icon('Minus',20));
   const close = button('','window-button',() => { if (native) void invoke('hide_to_tray'); }); close.setAttribute('aria-label',m.close); close.append(icon('X',20)); windowActions.append(minimize,close); top.append(brand,windowActions);
-  const tabs = element('nav','tabs'); tabs.role = 'tablist';
-  const pill = element('span','tab-indicator'); pill.setAttribute('aria-hidden','true'); tabs.append(pill);
+  let tabs = element('nav','tabs'); tabs.role = 'tablist';
+  let pill = element('span','tab-indicator'); pill.setAttribute('aria-hidden','true'); tabs.append(pill);
   const tabIds = ['render','capture','settings'];
   [m.output,m.input,m.settings].forEach((label,i) => {
     const btn = button(label,'tab',() => { tab = tabIds[i]; render(); document.getElementById(`tab-${tab}`)?.focus(); }); btn.id = `tab-${tabIds[i]}`; btn.role = 'tab'; btn.tabIndex = tab === tabIds[i] ? 0 : -1; btn.setAttribute('aria-selected',String(tab === tabIds[i])); btn.setAttribute('aria-controls','panel');
@@ -302,12 +317,31 @@ function render() {
     const children=[...content.children].map(child=>preserved.get(child)??child);
     [...oldPanel.children].filter(child=>!children.includes(child)).forEach(child=>child.remove());
     children.forEach((child,index)=>{if(oldPanel.children[index]!==child)oldPanel.insertBefore(child,oldPanel.children[index]??null);});
-    oldFrame.querySelector('.header')!.replaceWith(header);
     frame=oldFrame; content=oldPanel;
+  } else if(oldFrame && oldPanel) {
+    oldPanel.replaceWith(content); frame=oldFrame;
   } else app.replaceChildren(frame);
+  // Keep header controls mounted so a tab click can finish its release motion.
+  const keptHeader=frame.querySelector<HTMLElement>('.header')!;
+  if(keptHeader!==header) {
+    const keptTabs=keptHeader.querySelector<HTMLElement>('.tabs')!;
+    const nextTabs=tabs.querySelectorAll<HTMLButtonElement>('.tab');
+    keptTabs.querySelectorAll<HTMLButtonElement>('.tab').forEach((button,index)=>{
+      const next=nextTabs[index];
+      button.textContent=next.textContent; button.tabIndex=next.tabIndex;
+      button.setAttribute('aria-selected',next.getAttribute('aria-selected')!);
+    });
+    const nextActions=header.querySelectorAll<HTMLButtonElement>('.window-button');
+    keptHeader.querySelectorAll<HTMLButtonElement>('.window-button').forEach((button,index)=>{
+      button.setAttribute('aria-label',nextActions[index].getAttribute('aria-label')!);
+    });
+    tabs=keptTabs; pill=keptTabs.querySelector<HTMLElement>('.tab-indicator')!;
+  }
   slidingTabs.mount(tabs,pill);
+  const outputGroupsMoving=outputGroupMotion.animate(content,outputGroupsPaint);
+  animateAppGroups(content,appGroups);
   disposeScrollbars.push(mountScrollbar(content,frame,'main'));
-  content.scrollTop = scrollTop;
+  if(!outputGroupsMoving)content.scrollTop = scrollTop;
   animateDividerOpacity(content,dividerOpacity);
   animateDeviceChange(content,devicePaint);
   animateInputSelection(content,inputSelection);
@@ -511,6 +545,10 @@ function sonarChannels(showApplications = true) {
       [session.display_name,session.process_name].some(name => name.trim() && !/^unk(?:nown|own)$/i.test(name.trim())));
     const partition=partitionApplications(applications,routing,groups.map(group=>group.channel));
     applicationsByChannel=partition.channels;otherApplications=partition.other;
+    for(const [channel,items] of applicationsByChannel) {
+      applicationsByChannel.set(channel,applicationOrder.sort(channel,items,application=>applicationOrderKey(application,routingByProcess)));
+    }
+    otherApplications=applicationOrder.sort('other',otherApplications,application=>applicationOrderKey(application,routingByProcess));
   }
   for (const group of groups) {
     const channel = group.channel;
@@ -593,12 +631,12 @@ function sonarChannels(showApplications = true) {
       }
       card.append(applications);section.append(card);
     }
-    const add = control(button('','sonar-group-add',() => void act({kind:'add_group'}))); add.id = 'group-add';
-    add.append(icon('Plus'),element('span','',english ? 'Add group' : '그룹 추가'));
-    add.disabled = !controlsAvailable || groups.length >= 4;
-    add.setAttribute('aria-disabled',String(add.disabled || busy));
-    add.title = groups.length >= 4 ? (english ? 'Maximum four groups' : '최대 4개 그룹') : '';
-    section.append(add);
+    if(groups.length < 4) {
+      const add = control(button('','sonar-group-add',() => void act({kind:'add_group'}))); add.id = 'group-add';
+      add.append(icon('Plus'),element('span','',english ? 'Add group' : '그룹 추가'));
+      add.setAttribute('aria-disabled',String(add.disabled || busy));
+      section.append(add);
+    }
   }
   return section;
 }
@@ -694,19 +732,25 @@ function sonarApplication(application: ApplicationGroup, labels: Record<MixerCha
   if (iconSource) programIcon.src=iconSource; else programIcon.style.visibility='hidden';
   const handle=element('span','sonar-app-handle');handle.setAttribute('aria-hidden','true');handle.append(icon('reorder'));
   row.append(programIcon,info,handle);row.id=`sonar-app-${session.process_id}`;row.tabIndex=0;row.role='button';
+  const orderKey=applicationOrderKey(application,routingByProcess);
+  row.dataset.applicationKey=orderKey;
   row.setAttribute('aria-label',`${name}, ${labels[session.route as MixerChannel] ?? session.route}`);
-  row.title=state!.settings.language==='en' ? `${name}: drag to another group · Shift+↑/↓` : `${name}: 다른 그룹으로 드래그 · Shift+↑/↓`;
+  row.title=state!.settings.language==='en' ? `${name}: drag to reorder or change group · Shift+↑/↓` : `${name}: 드래그로 순서·그룹 변경 · Shift+↑/↓`;
   const movable=!!meta?.stable_id && !session.routing_error;
   row.setAttribute('aria-disabled',String(!movable || busy));
-  const moveTo=(channel:string) => {
+  const moveTo=async(channel:string,before:string|null=null) => {
+    const target=[...document.querySelectorAll<HTMLElement>('.sonar-channel[data-channel]')].find(card=>card.dataset.channel===channel);
+    const visible=[...target?.querySelectorAll<HTMLElement>('.sonar-app')??[]].map(item=>item.dataset.applicationKey!);
+    const undo=applicationOrder.place(channel,orderKey,before,visible);
+    if(channel===session.route) {saveApplicationOrder();render();return;}
     if (!native && import.meta.env.DEV) {
       // Preview gesture/model only: no audio policy or GG requests in a browser.
       state!.sonar.applications.filter(member => application.process_ids.includes(member.process_id)).forEach(member => member.route=channel);
       state!.app_routing?.filter(member => application.process_ids.includes(member.process_id)).forEach(member => {member.requested=channel as Channel;member.origin='user';});
-      render();
-      return Promise.resolve();
+      saveApplicationOrder();render();return;
     }
-    return act({kind:'assign_application',process_id:session.process_id,process_name:session.process_name,channel,automatic:false});
+    if(await act({kind:'assign_application',process_id:session.process_id,process_name:session.process_name,channel,automatic:false}))saveApplicationOrder();
+    else {undo();render();}
   };
   bindAppDrag(row,{canStart:() => movable && !busy && !dragging && (native || import.meta.env.DEV),onStart:cancel => {dragging=true;cancelDrag=cancel;},onFinish:() => {dragging=false;cancelDrag=null;render();},onDrop:moveTo});
   row.addEventListener('keydown',event => {

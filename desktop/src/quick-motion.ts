@@ -1,14 +1,18 @@
 import { cssTimeMs } from './motion-time';
 import { captureDividerOpacity, animateDividerOpacity } from './divider-motion';
 import { captureDevicePaint, animateDeviceChange } from './device-transition';
+import { captureInputSelection, animateInputSelection } from './input-selection-motion';
 
 // One mounted surface and one geometry timeline, in a stable native viewport.
 // Native calls change only its input/paint region, never WebView2's buffer size.
 export class QuickSurface {
   private page: HTMLElement | null = null;
   private pending: (() => Promise<void>) | null = null;
+  private pendingPage: HTMLElement | null = null;
   private running = false;
   private animations: Animation[] = [];
+  private outgoing: HTMLElement[] = [];
+  private interrupted = false;
   private presented: (() => void) | null = null;
   private geometry: ResizeObserver;
   private prepared=new Map<string,HTMLElement>();
@@ -45,7 +49,7 @@ export class QuickSurface {
   }
 
   show(page: HTMLElement, animate=true) {
-    this.enqueue(()=>this.showPage(page,animate));
+    this.enqueue(()=>this.showPage(page,animate),page);
     // A hidden popup can settle without playing an invisible transition. Never
     // cancel back to the first keyframe, even when a close interrupts a page.
     if(!animate) {
@@ -58,16 +62,17 @@ export class QuickSurface {
     const owner=this.page;
     this.enqueue(async()=>{
       if(owner!==this.page || !owner?.isConnected)return;
-      const from=this.stage.offsetHeight;
-      const bodyFrom=body.offsetHeight;
+      const from=parseFloat(getComputedStyle(this.stage).height);
+      const bodyFrom=parseFloat(getComputedStyle(body).height);
       const inner=body.firstElementChild as HTMLElement;
-      const wasOpen=body.closest('.t-acc')?.getAttribute('data-open')==='true';
+      const opacity=Number(getComputedStyle(inner).opacity);
       const arrow=body.closest('.t-acc')?.querySelector<HTMLElement>('.t-acc-chevron');
-      if(arrow)arrow.style.transform=`rotateZ(${wasOpen?180:0}deg)`;
+      const arrowFrom=arrow?getComputedStyle(arrow).transform:'none';
+      if(arrow)arrow.style.transform=arrowFrom;
       // Freeze the existing appearance while measuring the FINAL disclosure
       // layout. CSS grid and a second height transition must not race this one.
-      inner.style.opacity=wasOpen?'1':'0';
-      inner.style.filter=wasOpen?'blur(0px)':'blur(2px)';
+      inner.style.opacity=String(opacity);
+      body.style.removeProperty('height');
       update();
       const bodyTo=body.offsetHeight;
       const to=owner.offsetHeight;
@@ -75,18 +80,19 @@ export class QuickSurface {
       body.style.height=`${bodyFrom}px`;
       try {
         await this.reserve(from,to);
-        if(!this.reduced()) {
+        if(!this.reduced() && !this.interrupted) {
           // Assign exactly the same start time to all lanes, including height.
           const options=this.options;
           const animations=[
             this.stage.animate([{height:`${from}px`},{height:`${to}px`}],options),
             body.animate([{height:`${bodyFrom}px`},{height:`${bodyTo}px`}],options),
-            inner.animate([{opacity:wasOpen?1:0,filter:wasOpen?'blur(0px)':'blur(2px)'},{opacity:open?1:0,filter:open?'blur(0px)':'blur(2px)'}],options),
+            inner.animate([{opacity},{opacity:open?1:0}],{...options,duration:cssTimeMs(getComputedStyle(inner).getPropertyValue('--quick-content-duration'),150)}),
           ];
+          animations.push(...this.dissolve(owner,Number(getComputedStyle(owner).opacity)));
           if(arrow) {
             const tokens=getComputedStyle(arrow);
             animations.push(arrow.animate([
-              {transform:`rotateZ(${wasOpen?180:0}deg)`},
+              {transform:arrowFrom},
               {transform:`rotateZ(${open?180:0}deg)`},
             ],{
               duration:cssTimeMs(tokens.getPropertyValue('--duration-fast'),250),
@@ -97,21 +103,36 @@ export class QuickSurface {
           await this.play(animations);
         }
       } finally {
-        body.style.height=`${bodyTo}px`;
-        inner.style.opacity=open?'1':'0';
-        inner.style.filter=open?'blur(0px)':'blur(2px)';
-        if(arrow)arrow.style.transform=`rotateZ(${open?180:0}deg)`;
-        await this.settle(to);
-        arrow?.style.removeProperty('transform');
-        body.style.removeProperty('height');
-        inner.style.removeProperty('opacity');
-        inner.style.removeProperty('filter');
+        if(this.interrupted) {
+          // Keep the painted disclosure for the next gesture to measure.
+          await this.settle(parseFloat(getComputedStyle(this.stage).height));
+        } else {
+          body.style.height=`${bodyTo}px`;
+          inner.style.opacity=open?'1':'0';
+          owner.style.opacity='1';
+          this.retireOutgoing();
+          if(arrow)arrow.style.transform=`rotateZ(${open?180:0}deg)`;
+          await this.settle(to);
+          arrow?.style.removeProperty('transform');
+          body.style.removeProperty('height');
+          inner.style.removeProperty('opacity');
+        }
       }
     });
   }
 
-  private enqueue(operation: () => Promise<void>) {
+  private enqueue(operation: () => Promise<void>,page?:HTMLElement) {
+    this.pendingPage?.remove();
+    this.pendingPage=page??null;
     this.pending=operation;
+    if(this.running) {
+      this.interrupted=true;
+      // A new gesture starts from the frame on screen, without waiting for the
+      // old destination or jumping to it. Commit before cancelling the effects.
+      this.animations.forEach(animation=>{animation.commitStyles();animation.cancel();});
+      this.animations=[];
+      this.presented?.();
+    }
     if(!this.running)void this.drain();
   }
 
@@ -122,6 +143,8 @@ export class QuickSurface {
       while(this.pending) {
         const operation=this.pending;
         this.pending=null;
+        this.pendingPage=null;
+        this.interrupted=false;
         try { await operation(); }
         catch(reason) { console.error(reason); }
       }
@@ -159,26 +182,41 @@ export class QuickSurface {
     // Prepare the first filtered/layered frame before starting the 250ms clock.
     // Cold layer setup must not consume the beginning of the visible motion.
     animations.forEach(animation=>{animation.pause();animation.currentTime=0;});
-    await Promise.all(animations.map(animation=>animation.ready));
+    const finished=Promise.allSettled(animations.map(animation=>animation.finished));
+    await Promise.allSettled(animations.map(animation=>animation.ready));
+    if(this.interrupted)return;
     const start=document.timeline.currentTime;
     animations.forEach(animation=>{
       if(this.reduced())animation.finish();
       else {animation.play();if(typeof start==='number')animation.startTime=start;}
     });
-    await Promise.all(animations.map(animation=>animation.finished));
+    await finished;
   }
 
-  private async animateHeight(from:number,to:number) {
-    if(this.reduced() || Math.abs(to-from)<=.5)return;
-    await this.play([this.stage.animate([{height:`${from}px`},{height:`${to}px`}],this.options)]);
+  private dissolve(page:HTMLElement,opacity:number) {
+    const tokens=getComputedStyle(this.stage);
+    const options:KeyframeAnimationOptions={
+      duration:cssTimeMs(tokens.getPropertyValue('--quick-content-duration'),150),
+      easing:tokens.getPropertyValue('--quick-content-ease').trim() || 'ease-in-out',
+      fill:'forwards',
+    };
+    return [
+      ...(opacity<1?[page.animate([{opacity},{opacity:1}],options)]:[]),
+      ...this.outgoing.map(layer=>layer.animate([{opacity:Number(getComputedStyle(layer).opacity)},{opacity:0}],options)),
+    ];
+  }
+
+  private retireOutgoing() {
+    this.outgoing.forEach(layer=>layer.remove());
+    this.outgoing=[];
   }
 
   private get options(): KeyframeAnimationOptions {
     const tokens=getComputedStyle(document.documentElement);
     // Production CSS minification rewrites 250ms as .25s. WAAPI always takes
     // milliseconds: parsing only the number makes a visible tween last .25ms.
-    const duration=cssTimeMs(tokens.getPropertyValue('--page-slide-dur'),250);
-    return {duration,easing:tokens.getPropertyValue('--page-slide-ease').trim() || 'cubic-bezier(.22,1,.36,1)',fill:'forwards'};
+    const duration=cssTimeMs(tokens.getPropertyValue('--quick-resize-duration'),250);
+    return {duration,easing:tokens.getPropertyValue('--ease-smooth-out').trim() || 'cubic-bezier(.22,1,.36,1)',fill:'forwards'};
   }
 
   private publishHeight(height:number) {
@@ -195,29 +233,29 @@ export class QuickSurface {
     this.animations.forEach(animation=>animation.cancel());
     this.animations=[];
     await this.resize(height);
-    await this.present();
+    if(!this.pending)await this.present();
   }
 
   private async showPage(page:HTMLElement,animate:boolean) {
     const previous=this.page;
     const dividerOpacity=captureDividerOpacity(previous);
     const devicePaint=captureDevicePaint(previous?.dataset.viewKey===page.dataset.viewKey?previous:null);
+    const inputSelection=captureInputSelection(previous?.dataset.viewKey===page.dataset.viewKey?previous:null);
     const focused=document.activeElement as HTMLElement | null;
     const focusId=previous?.contains(focused) ? focused?.id : undefined;
     const changed=!!previous && previous.dataset.viewKey!==page.dataset.viewKey;
     const transition=changed && !this.reduced(animate);
-    const direction=page.dataset.pageId==='2'?1:-1;
-    const tokens=getComputedStyle(this.stage);
-    const distance=parseFloat(tokens.getPropertyValue('--page-slide-distance')) || 8;
-    const blur=parseFloat(tokens.getPropertyValue('--page-blur')) || 3;
-    const from=this.stage.offsetHeight;
+    const previousOpacity=previous?Number(getComputedStyle(previous).opacity):1;
+    const from=parseFloat(getComputedStyle(this.stage).height);
     // Keep prepared layers mounted and transparent through measurement.
     page.style.opacity='0';
     page.inert=true;
     if(page.parentElement!==this.stage)this.stage.append(page);
     const to=page.offsetHeight;
+    let activated=false;
     try {
       await this.reserve(from || to,to);
+      if(this.interrupted)return;
       if(previous) {
         previous.inert=true;
         previous.setAttribute('aria-hidden','true');
@@ -225,43 +263,43 @@ export class QuickSurface {
         previous.querySelectorAll('[id]').forEach(node=>node.removeAttribute('id'));
       }
       this.page=page;
-      page.style.opacity=transition?'0':'1';
-      page.style.transform=transition?`translate3d(${direction*distance}px,0,0)`:'translate3d(0,0,0)';
-      page.style.filter=transition?`blur(${blur}px)`:'blur(0px)';
+      activated=true;
+      page.style.opacity=transition?'0':String(previousOpacity);
       page.style.removeProperty('visibility');
       page.removeAttribute('aria-hidden');
       page.inert=false;
       if(!this.reduced(animate))animateDividerOpacity(page,dividerOpacity);
-      // Tray navigation already has a page slide. In-place updates may fade,
-      // but device labels/icons must never use the main window's vertical push.
+      // Navigation is a stationary dissolve. In-place device changes use the
+      // same fixed slots, without the main window's vertical push.
       if(!this.reduced(animate))animateDeviceChange(page,devicePaint,{slide:false});
-      if(transition) {
-        page.dataset.animating='true';previous!.dataset.animating='true';
+      if(!this.reduced(animate))animateInputSelection(page,inputSelection);
+      if(transition)this.outgoing.push(previous!);
+      else previous?.remove();
+      if(!this.reduced(animate)) {
+        page.dataset.animating='true';
+        this.outgoing.forEach(layer=>layer.dataset.animating='true');
         const animations: Animation[]=[];
         const options=this.options;
         if(Math.abs(to-from)>.5)animations.push(this.stage.animate([{height:`${from}px`},{height:`${to}px`}],options));
-        // Transitions.dev page slide: the incoming page resolves from 3px blur
-        // as the outgoing page softens away. All lanes share the geometry clock.
-        animations.push(page.animate([{opacity:0,transform:`translate3d(${direction*distance}px,0,0)`,filter:`blur(${blur}px)`},{opacity:1,transform:'translate3d(0,0,0)',filter:'blur(0px)'}],options));
-        animations.push(previous!.animate([{opacity:1,transform:'translate3d(0,0,0)',filter:'blur(0px)'},{opacity:0,transform:`translate3d(${-direction*distance}px,0,0)`,filter:`blur(${blur}px)`}],options));
-        await this.play(animations);
-      } else {
-        previous?.remove();
-        if(!this.reduced(animate))await this.animateHeight(from || to,to);
+        animations.push(...this.dissolve(page,transition?0:previousOpacity));
+        if(animations.length)await this.play(animations);
       }
     } finally {
-      // Retire the outgoing layer before cancelling its fill-forwards effect.
-      // It must never return to opacity:1 for a compositor frame.
-      previous?.remove();
-      delete page.dataset.animating;
-      page.style.visibility='visible';
-      page.style.opacity='1';
-      page.style.transform='translate3d(0,0,0)';
-      page.style.filter='blur(0px)';
-      page.inert=false;
-      this.page=page;
-      await this.settle(to);
-      if(focusId && document.activeElement===document.body)page.querySelector<HTMLElement>(`#${CSS.escape(focusId)}`)?.focus({preventScroll:true});
+      if(!activated)page.remove();
+      else {
+        // Interrupted dissolves retain every painted layer for the next gesture.
+        // Removing the dominant outgoing layer here would cause a one-frame flash.
+        if(!this.interrupted) {
+          this.retireOutgoing();
+          page.style.opacity='1';
+        }
+        delete page.dataset.animating;
+        page.style.visibility='visible';
+        page.inert=false;
+        this.page=page;
+        await this.settle(this.interrupted?parseFloat(getComputedStyle(this.stage).height):to);
+        if(focusId && document.activeElement===document.body)page.querySelector<HTMLElement>(`#${CSS.escape(focusId)}`)?.focus({preventScroll:true});
+      }
     }
   }
 }

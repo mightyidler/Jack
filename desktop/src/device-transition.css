@@ -24,8 +24,8 @@
 .device-drum-face>.icon { flex:none; }
 .device-drum-face>.device-name { min-width:0; }
 .device-drum[data-spinning=true] .device-drum-face[data-visible=true] { will-change:opacity,filter; }
-/* Input selection: the surface leads, then the new check follows the old exit.
-   The row's label and microphone stay readable throughout the color change. */
+/* Input labels stay readable while the shared selection controller moves the
+   surface and draws the check on a separate, synchronized timeline. */
 .device-section {
   --device-text-duration:var(--duration-quick);
   --device-surface-duration:var(--duration-fast);

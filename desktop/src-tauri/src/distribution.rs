@@ -2,6 +2,7 @@
 use crate::audio::{Action, Broker};
 use serde::Serialize;
 use std::{
+    future::Future,
     os::windows::process::CommandExt,
     process::Command,
     sync::{
@@ -18,6 +19,7 @@ pub struct State {
     operation: Mutex<()>,
     update_operation: tauri::async_runtime::Mutex<()>,
     updating: AtomicBool,
+    startup_checked: AtomicBool,
 }
 impl State {
     fn ensure_setup_allowed(&self) -> Result<(), String> {
@@ -185,12 +187,21 @@ pub async fn check_jack_update(
     if state.updating.load(Ordering::Acquire) {
         return Err("An update is already being applied".into());
     }
-    let update = app
-        .updater()
+    check_update(&app).await
+}
+
+async fn check_update(app: &tauri::AppHandle) -> Result<UpdateInfo, String> {
+    let mut update = app
+        .updater_builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
         .map_err(|e| e.to_string())?
         .check()
         .await
         .map_err(|e| e.to_string())?;
+    if let Some(update) = &mut update {
+        update.timeout = Some(std::time::Duration::from_secs(300));
+    }
     let info = UpdateInfo {
         current: app.package_info().version.to_string(),
         version: update.as_ref().map(|u| u.version.clone()),
@@ -216,6 +227,11 @@ pub async fn install_jack_update(
         .update_operation
         .try_lock()
         .map_err(|_| "Another update operation is running")?;
+    apply_update(&app).await
+}
+
+async fn apply_update(app: &tauri::AppHandle) -> Result<(), String> {
+    let state = app.state::<State>();
     state.begin_update()?;
     let _guard = UpdateGuard(app.clone());
     let update = app
@@ -263,9 +279,97 @@ pub async fn install_jack_update(
     app.restart();
 }
 
+// The process owns this task, so hidden/suspended WebViews cannot skip it.
+// Failed checks are not retried until the next launch. Manual checks remain available.
+async fn run_startup_update(
+    state: &State,
+    check: impl Future<Output = Result<bool, String>>,
+    install: impl Future<Output = Result<(), String>>,
+) -> Result<(), String> {
+    if state.startup_checked.swap(true, Ordering::AcqRel) {
+        return Ok(());
+    }
+    let _operation = state.update_operation.lock().await;
+    if check.await? {
+        install.await?;
+    }
+    Ok(())
+}
+
+pub fn start_update_check(app: tauri::AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let result = run_startup_update(
+            &app.state::<State>(),
+            async { check_update(&app).await.map(|info| info.version.is_some()) },
+            apply_update(&app),
+        )
+        .await;
+        match result {
+            Ok(()) => eprintln!("Jack startup update check completed"),
+            Err(error) => eprintln!("Jack startup update failed: {error}"),
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn startup_checks_once_and_installs_only_when_a_new_version_exists() {
+        for available in [false, true] {
+            let state = State::default();
+            let checks = std::sync::atomic::AtomicUsize::new(0);
+            let installs = std::sync::atomic::AtomicUsize::new(0);
+            for _ in 0..2 {
+                tauri::async_runtime::block_on(run_startup_update(
+                    &state,
+                    async {
+                        assert!(state.update_operation.try_lock().is_err());
+                        checks.fetch_add(1, Ordering::SeqCst);
+                        Ok(available)
+                    },
+                    async {
+                        assert!(state.update_operation.try_lock().is_err());
+                        installs.fetch_add(1, Ordering::SeqCst);
+                        Ok(())
+                    },
+                ))
+                .unwrap();
+            }
+            assert_eq!(checks.load(Ordering::SeqCst), 1);
+            assert_eq!(installs.load(Ordering::SeqCst), usize::from(available));
+        }
+    }
+
+    #[test]
+    fn failed_startup_check_or_install_does_not_retry_or_block_manual_updates() {
+        for check_fails in [false, true] {
+            let state = State::default();
+            let result = tauri::async_runtime::block_on(run_startup_update(
+                &state,
+                async {
+                    if check_fails {
+                        Err("offline".into())
+                    } else {
+                        Ok(true)
+                    }
+                },
+                async {
+                    assert!(!check_fails);
+                    Err("installation failed".into())
+                },
+            ));
+            assert!(result.is_err());
+            assert!(state.update_operation.try_lock().is_ok());
+            assert!(state.ensure_setup_allowed().is_ok());
+            tauri::async_runtime::block_on(run_startup_update(
+                &state,
+                async { panic!("startup check must not retry") },
+                async { panic!("installation must not retry") },
+            ))
+            .unwrap();
+        }
+    }
     #[test]
     fn setup_and_update_exclude_each_other_and_concurrent_checks_are_rejected() {
         let state = State::default();

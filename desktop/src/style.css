@@ -76,7 +76,7 @@ button:disabled,select:disabled { cursor:default; }
 /* Same native radius and inset border paint as the audio group cards. */
 .tabs { position:relative; display:flex; padding:4px; border-radius:var(--card-radius); background:var(--navbar); height:36px; box-shadow:inset 0 0 0 1px var(--group-surface); }
 .tab-indicator { position:absolute; top:4px; bottom:4px; border-radius:20px; background:var(--tab-selected); pointer-events:none; }
-.tab { position:relative; flex:1; min-width:0; padding:4px 12px; border-radius:20px; color:var(--inactive); font-size:15px; font-weight:500; line-height:20px; letter-spacing:-.15px; white-space:nowrap; transition:color .2s ease; }
+.tab { position:relative; flex:1; min-width:0; padding:4px 12px; border-radius:20px; color:var(--inactive); font-size:15px; font-weight:500; line-height:20px; letter-spacing:-.15px; white-space:nowrap; transition:color var(--duration-quick) ease-in-out; }
 .tab[aria-selected=true] { color:var(--text); }
 .scroll-edge { position:absolute; z-index:1; top:0; left:0; width:100%; height:68px; pointer-events:none; background:transparent; opacity:.9; mask-image:url('/assets/figma/header-mask.svg'); mask-size:100% 68px; -webkit-backdrop-filter:blur(30px); backdrop-filter:blur(30px); }
 .content { position:absolute; inset:0; padding:108px 12px 12px; overflow:auto; }
@@ -87,11 +87,11 @@ button:disabled,select:disabled { cursor:default; }
 .startup-settings { border-radius:16px; overflow:hidden; }
 .shortcut-settings { margin:0; border-radius:16px; overflow:hidden; }
 .content.settings .item-title { font-weight:500; }
-.shortcut-editor { display:grid; grid-template-rows:0fr; opacity:0; transition:grid-template-rows 250ms var(--ease-smooth-out),opacity 250ms var(--ease-smooth-out); }
+.shortcut-editor { display:grid; grid-template-rows:0fr; opacity:0; transition:grid-template-rows var(--duration-fast) var(--ease-smooth-out),opacity var(--duration-fast) var(--ease-smooth-out); }
 .shortcut-settings[data-enabled=true] .shortcut-editor { grid-template-rows:1fr; opacity:1; }
 .shortcut-editor-inner { min-height:0; overflow:hidden; }
-.shortcut-editor-inner { opacity:0; filter:blur(2px); transform:translateY(-4px); transition:opacity 250ms var(--ease-smooth-out),filter 250ms var(--ease-smooth-out),transform 250ms var(--ease-smooth-out); }
-.shortcut-settings[data-enabled=true] .shortcut-editor-inner { opacity:1; filter:blur(0px); transform:translateY(0px); }
+.shortcut-editor-inner { opacity:0; transition:opacity var(--duration-fast) var(--ease-smooth-out); }
+.shortcut-settings[data-enabled=true] .shortcut-editor-inner { opacity:1; }
 .shortcut-editor-content { display:flex; flex-direction:column; gap:12px; padding:0 12px 12px; }
 .shortcut-divider { height:1px; flex:none; background:var(--divider); }
 .shortcut-choice { display:flex; align-items:center; justify-content:space-between; gap:12px; }
@@ -106,14 +106,14 @@ button:disabled,select:disabled { cursor:default; }
 .description { flex:1; min-width:0; }
 .item-title { font-size:17px; font-weight:400; line-height:24px; letter-spacing:-.34px; }
 .item-hint { font-size:13px; font-weight:300; line-height:18px; letter-spacing:-.26px; color:var(--secondary); margin-top:2px; white-space:pre-line; }
-/* Bald's track, 21px thumb travel, .9 pressed compression and spring release. */
+/* Track and thumb settle together, with bounded press feedback. */
 .switch { position:relative; width:64px; height:28px; padding:0; flex:none; border-radius:100px; }
-.switch-track { position:absolute; inset:0; border-radius:100px; background:var(--toggle-off); transition:background .26s ease; }
+.switch-track { position:absolute; inset:0; border-radius:100px; background:var(--toggle-off); transition:background-color var(--duration-fast) var(--ease-smooth-out); }
 .switch[aria-checked=true] .switch-track { background:var(--green); }
-.knob { position:absolute; top:2px; left:2px; width:39px; height:24px; border-radius:100px; background:#fff; display:block; transform:translateX(0); transition:transform .38s cubic-bezier(.34,1.56,.64,1); will-change:transform; }
+.knob { position:absolute; top:2px; left:2px; width:39px; height:24px; border-radius:100px; background:#fff; display:block; transform:translateX(0); transition:transform var(--duration-fast) var(--ease-smooth-out); }
 .switch[aria-checked=true] .knob { transform:translateX(21px); }
-.switch:active:not(:disabled) .knob { transform:scaleX(.9); transform-origin:left center; }
-.switch[aria-checked=true]:active:not(:disabled) .knob { transform:translateX(21px) scaleX(.9); transform-origin:right center; }
+.switch:active:not(:disabled) .knob { transform:scaleX(.96); transform-origin:left center; transition-duration:var(--duration-press); }
+.switch[aria-checked=true]:active:not(:disabled) .knob { transform:translateX(21px) scaleX(.96); transform-origin:right center; }
 @media(hover:hover) {
   .switch:hover:not(:disabled) .switch-track { background:color-mix(in srgb,var(--toggle-off) 92%,var(--text) 8%); }
   .switch[aria-checked=true]:hover:not(:disabled) .switch-track { background:color-mix(in srgb,var(--green) 92%,var(--text) 8%); }
@@ -144,7 +144,7 @@ select { appearance:none; min-width:44px; padding:0; border:0; background:transp
 .adjusting:focus,.adjusting:focus-visible { outline:none; }
 .empty { padding:20px 16px; color:var(--secondary); font-size:13px; font-weight:400; line-height:18px; }
 .retry { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-width:144px; min-height:40px; padding:10px 14px; border-radius:100px; background:var(--surface); color:var(--text); box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--text) 10%,transparent); font-size:14px; line-height:20px; letter-spacing:-.28px; font-weight:500;
-  transition:transform var(--duration-release,380ms) cubic-bezier(.34,1.56,.64,1),background-color var(--duration-quick,150ms) var(--ease-smooth-out),opacity var(--duration-quick,150ms) ease-out;
+  transition:transform var(--duration-fast) var(--ease-smooth-out),background-color var(--duration-quick) var(--ease-smooth-out),opacity var(--duration-quick) ease-out;
 }
 .retry>.icon { flex:none; }
 .retry:active:enabled { transform:scale(.98); transition-duration:var(--duration-micro,80ms),var(--duration-quick,150ms),var(--duration-quick,150ms); }

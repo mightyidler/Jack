@@ -1,16 +1,16 @@
 /* Native viewport stays stable. Only CSS panel geometry and page layers move. */
-:root { --page-slide-dur:var(--duration-fast); --page-slide-distance:8px; --page-blur:3px; --page-slide-ease:var(--ease-smooth-out); }
+:root { --quick-resize-duration:250ms; --quick-content-duration:150ms; --quick-content-ease:ease-in-out; }
 /* Use the panel's existing 8px padding for the 6px elastic left stretch.
    Keep page clipping inside that panel rather than cutting back the volume. */
 .quick-stage { position:relative; width:100%; overflow:clip; overflow-clip-margin:8px; contain:layout; }
 .quick-stage>.quick-content { position:absolute; top:0; left:0; width:100%; }
-.quick-stage>.quick-content[data-animating=true] { will-change:transform,opacity,filter; }
+.quick-stage>.quick-content[data-animating=true] { will-change:opacity; }
 .quick-stage>.quick-content[aria-hidden=true] { pointer-events:none; }
 /* One height timeline owns both disclosure and surface; do not also animate a
    CSS grid track and leave its transient height as the native/stage target. */
 .quick-stage .t-acc-panel { display:block; overflow:clip; overflow-clip-margin:8px; height:0; transition:none; }
 .quick-stage .t-acc[data-open=true] .t-acc-panel { height:auto; }
-.quick-stage .t-acc-panel-inner { overflow:visible; transition:none; }
+.quick-stage .t-acc-panel-inner { overflow:visible; filter:none; transition:none; }
 /* QuickSurface drives the chevron's real Z rotation on the same WAAPI clock as
    disclosure height. CSS only supplies its resting angle after that clock ends. */
 .quick-stage .quick-input-toggle .t-acc-chevron { transition:none; }

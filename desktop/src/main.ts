@@ -30,6 +30,8 @@ import { captureDividerOpacity, animateDividerOpacity } from './divider-motion';
 import './divider-motion.css';
 import { captureDevicePaint, animateDeviceChange } from './device-transition';
 import './device-transition.css';
+import { captureInputSelection, animateInputSelection } from './input-selection-motion';
+import './input-selection-motion.css';
 
 type Flow = 'render' | 'capture';
 export type Theme = 'system' | 'dark' | 'light';
@@ -222,6 +224,7 @@ function render() {
   const oldPanel = document.getElementById('panel');
   const dividerOpacity=captureDividerOpacity(oldPanel);
   const devicePaint=captureDevicePaint(oldPanel?.classList.contains(tab)?oldPanel:null);
+  const inputSelection=captureInputSelection(oldPanel?.classList.contains(tab)?oldPanel:null);
   retireVolumeMotions();
   const scrollTop = oldPanel?.classList.contains(tab) ? oldPanel.scrollTop : 0;
   disposeScrollbars.forEach(dispose => dispose()); disposeScrollbars=[];
@@ -307,6 +310,7 @@ function render() {
   content.scrollTop = scrollTop;
   animateDividerOpacity(content,dividerOpacity);
   animateDeviceChange(content,devicePaint);
+  animateInputSelection(content,inputSelection);
   if (focused) document.getElementById(focused)?.focus({preventScroll:true});
 }
 function renderSettings(content: HTMLElement) {
@@ -385,7 +389,8 @@ function resetDialog() {
   let closing=false;
   const close=(after?: () => void) => {
     if (closing) return; closing=true; dialog.classList.remove('is-open'); dialog.classList.add('is-closing');
-    setTimeout(() => { dialog.close(); after?.(); },matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 150);
+    const duration=cssTimeMs(getComputedStyle(dialog).getPropertyValue('--duration-quick'),150);
+    setTimeout(() => { dialog.close(); after?.(); },matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : duration);
   };
   const cancel=button(m.cancel,'dialog-button',() => close());
   const confirm=button(m.confirm,'dialog-button danger',() => close(() => void act({kind:'reset'})));
@@ -397,6 +402,7 @@ function resetDialog() {
 }
 function deviceList(flow: Flow, heading = true) {
   const m = t(); const section = element('section','device-section'); if (heading) section.append(sectionLabel(flow === 'render' ? m.outputs : m.inputs)); const list = element('div','card device-list');
+  list.dataset.inputList=flow;
   // Sonar owns the virtual Windows default. This picker changes its physical mic route.
   const devices = state!.sonar.devices.filter(d => d.role === 'capture' && d.enabled);
   const route = state!.sonar.routes.find(r => r.channel === 'microphone');
@@ -414,7 +420,12 @@ function deviceList(flow: Flow, heading = true) {
     // Device IDs and availability come from GG; Windows metadata only supplies the icon shape.
     const image = icon('Mic',quick ? 20 : 24);
     const label = element('span','device-name',deviceLabel(device.name));
-    const check=icon('Check',quick ? 20 : 24);check.classList.add('check');
+    const check=document.createElementNS('http://www.w3.org/2000/svg','svg');
+    check.classList.add('check','input-selection-check');check.setAttribute('viewBox','0 0 24 24');check.setAttribute('aria-hidden','true');
+    const checkPath=document.createElementNS('http://www.w3.org/2000/svg','path');
+    checkPath.setAttribute('d','M20 6L9 17L4 12');checkPath.setAttribute('pathLength','1');
+    checkPath.setAttribute('fill','none');checkPath.setAttribute('stroke','currentColor');checkPath.setAttribute('stroke-width','2.5');
+    checkPath.setAttribute('stroke-linecap','round');checkPath.setAttribute('stroke-linejoin','round');check.append(checkPath);
     const level=active ? micVolume?.volume ?? 0 : state!.settings.microphone_device_volumes?.[device.id] ?? 0;
     // Keep selection and volume feedback in one fixed slot on every input row.
     // Its parent fades on selection; its children own only the check/value swap.
@@ -653,7 +664,8 @@ function openOutputMenu(channel: OutputGroup, trigger: HTMLButtonElement) {
     if (menu.matches(':popover-open')) return;
     trigger.setAttribute('aria-expanded','false');
     const restore = menu.contains(document.activeElement) || document.activeElement === document.body;
-    setTimeout(cleanup,matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 150);
+    const duration=cssTimeMs(getComputedStyle(menu).getPropertyValue('--duration-quick'),150);
+    setTimeout(cleanup,matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : duration);
     if (restore && trigger.isConnected) trigger.focus({preventScroll:true});
   });
   menu.addEventListener('keydown',e => {

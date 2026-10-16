@@ -1,4 +1,5 @@
 import { mountScrollbar } from './scrollbars';
+import { cssTimeMs } from './motion-time';
 
 interface PreferenceOption { value:string; label:string; lang?:string }
 
@@ -56,7 +57,8 @@ export function preferenceDropdown(id: string, label: string, options: Preferenc
     menu.addEventListener('toggle',() => {
       if (menu.matches(':popover-open')) return;
       if(current===menu) trigger.setAttribute('aria-expanded','false'); events.abort();
-      setTimeout(()=>{disposeScrollbar();menu.remove();if(current===menu)current=null;},matchMedia('(prefers-reduced-motion: reduce)').matches?0:250);
+      const duration=cssTimeMs(getComputedStyle(menu).getPropertyValue('--duration-quick'),150);
+      setTimeout(()=>{disposeScrollbar();menu.remove();if(current===menu)current=null;},matchMedia('(prefers-reduced-motion: reduce)').matches?0:duration);
     });
     menu.addEventListener('keydown',event => {
       if(!['ArrowDown','ArrowUp','Home','End'].includes(event.key))return;

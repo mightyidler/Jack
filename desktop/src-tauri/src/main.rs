@@ -662,6 +662,7 @@ fn main() {
             if quick_preview {
                 popup::preview(app.handle()).map_err(std::io::Error::other)?;
             }
+            distribution::start_update_check(app.handle().clone());
             Ok(())
         })
         .on_window_event(|window, event| {

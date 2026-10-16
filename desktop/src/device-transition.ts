@@ -173,8 +173,9 @@ export function animateDeviceChange(root:ParentNode, previous:ReadonlyMap<string
       const fill=row.querySelector<HTMLElement>('.volume-fill');
       if(fill){fill.style.width=before.fill.width;fill.style.transform=before.fill.transform;}
     }
-    if(surface)fade(surface,before?.surfaceOpacity??0,selected?1:0,surfaceDuration,surfaceEasing);
-    if(status) {
+    const inputSelection=!!row.closest('[data-input-list]');
+    if(surface && !inputSelection)fade(surface,before?.surfaceOpacity??0,selected?1:0,surfaceDuration,surfaceEasing);
+    if(status && !inputSelection) {
       const duration=cssTimeMs(getComputedStyle(status).getPropertyValue('--volume-status-duration'),150);
       const from=before?.statusOpacity??0,to=selected?1:0;
       if(duration>0 && Math.abs(from-to)>.001) {

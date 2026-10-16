@@ -1,5 +1,5 @@
-// ello-reboot AppShell's measured indicator and butterySpring (170 / 26),
-// adapted to Jack's DOM renderer without adding React or Framer Motion.
+// A critically damped indicator follows new selections from its current
+// position and velocity, without overshoot or frame-rate-dependent integration.
 export class SlidingTabs {
   private pill: HTMLElement | null = null;
   private observer: ResizeObserver | null = null;
@@ -37,7 +37,8 @@ export class SlidingTabs {
 
   private paint() {
     if (!this.pill) return;
-    this.pill.style.left = `${this.position[0]}px`;
+    this.pill.style.left = '0';
+    this.pill.style.transform = `translate3d(${this.position[0]}px,0,0)`;
     this.pill.style.width = `${this.position[1]}px`;
   }
 
@@ -51,13 +52,13 @@ export class SlidingTabs {
 
   private tick = (time: number) => {
     this.frame = 0;
-    const elapsed = Math.min((time - this.last) / 1000,.032); this.last = time;
-    const steps = Math.max(1,Math.ceil(elapsed / (1 / 120))); const dt = elapsed / steps;
-    for (let step = 0; step < steps; step++) {
-      for (let i = 0; i < 2; i++) {
-        this.velocity[i] += (170 * (this.target[i] - this.position[i]) - 26 * this.velocity[i]) * dt;
-        this.position[i] += this.velocity[i] * dt;
-      }
+    const elapsed = Math.max(0,Math.min((time - this.last) / 1000,.064)); this.last = time;
+    const frequency=24,decay=Math.exp(-frequency*elapsed);
+    for (let i = 0; i < 2; i++) {
+      const offset=this.position[i]-this.target[i];
+      const momentum=this.velocity[i]+frequency*offset;
+      this.position[i]=this.target[i]+(offset+momentum*elapsed)*decay;
+      this.velocity[i]=(this.velocity[i]-frequency*momentum*elapsed)*decay;
     }
     const settled = this.position.every((value,i) => Math.abs(value-this.target[i]) < .0005 && Math.abs(this.velocity[i]) < .005);
     if (settled) { this.position = [...this.target]; this.velocity.fill(0); }

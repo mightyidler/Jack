@@ -376,10 +376,14 @@ impl Owner {
                 .iter()
                 .find(|session| session.pid == app.process_id)
                 .and_then(|session| session.executable_path.as_deref())
+                .map(str::to_owned)
+                .or_else(|| {
+                    jack_windows_audio::identity::process_executable_path(app.process_id).ok()
+                })
             {
                 app.icon_data_url = self
                     .app_icons
-                    .get_or_extract(path, || crate::program_icons::data_url(path));
+                    .get_or_extract(&path, || crate::program_icons::data_url(&path));
             }
         }
         Ok(ViewState {

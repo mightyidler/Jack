@@ -448,7 +448,9 @@ impl AppRouting {
             .applications
             .retain_mut(|app| match process_executable_path(app.process_id) {
                 Ok(path) => {
-                    if (app.process_name.trim().is_empty()
+                    if let Some(apple) = crate::apple_apps::from_executable(&path) {
+                        app.display_name = apple.display_name.into();
+                    } else if (app.process_name.trim().is_empty()
                         || app.process_name.eq_ignore_ascii_case("unknown"))
                         && (app.display_name.trim().is_empty()
                             || app.display_name.eq_ignore_ascii_case("unknown"))

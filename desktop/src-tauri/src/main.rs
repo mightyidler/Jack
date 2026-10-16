@@ -1,4 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod apple_apps;
 mod audio;
 mod bald_program_icons;
 mod distribution;
@@ -267,7 +268,7 @@ fn main() {
             .get(index + 1)
             .ok_or("report path required")
             .and_then(|path| {
-                program_icons::verify(std::path::Path::new(path))
+                program_icons::verify(std::path::Path::new(path), &args[index + 2..])
                     .map_err(|_| "program icon inspection failed")
             });
         if let Err(error) = result {

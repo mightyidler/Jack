@@ -23,6 +23,8 @@
 
 자동 화면·동작 검사는 실행하지 않는다. 실제 Windows 확인 결과는 사용자가 확인한 범위로 기록한다.
 
+2026-10-16: [0.1.7 릴리즈](https://github.com/mightyidler/Jack/releases/tag/v0.1.7)를 정식 공개하고 Latest로 지정했다. [배포 작업](https://github.com/mightyidler/Jack/actions/runs/38844422742)의 전체 검사·서명된 설치 파일 생성·초안 검증·공개 다운로드 검증이 통과했다. 이 PC에서도 `node tools/verify-release.mjs --published artifacts/distribution/v0.1.7`로 공개 업데이트 주소, 익명 다운로드, 기존 공개 키 호환성, Rust 업데이터 manifest 파싱, 설치 파일 서명과 변조 거부를 재확인했다. 설치 파일 SHA256은 `62e8df170b0b3dae348d1e8c5d0fa5685cc272c542e69beb6319e1e79054bcf9`이다. 실제 기존 앱에서 0.1.7 업데이트 설치·재시작·오디오 동작은 미확인이다.
+
 현재 사용 가능한 PC는 기존 GG가 설치된 한 대다. GG를 제거하거나 별도 Windows 환경을 구성하지 않는다.
 
 ## 실제 확인 절차

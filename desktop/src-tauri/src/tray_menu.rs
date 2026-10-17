@@ -83,7 +83,7 @@ pub async fn tray_menu_action(app: tauri::AppHandle, action: String) -> Result<(
             crate::show(&app);
             Ok(())
         }
-        "quit" => crate::quit(app).await,
+        "quit" => crate::quit(app).await.map_err(|error| error.detail),
         "hide" => Ok(()),
         _ => Err("unknown tray menu action".into()),
     }

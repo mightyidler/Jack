@@ -438,7 +438,7 @@ impl Owner {
             if change_startup && read_startup()?.as_deref() == desired {
                 write_startup(previous.as_deref())?;
             }
-            return Err(error.to_string());
+            return Err(format!("Settings save failed: {error}"));
         }
         self.settings = next;
         Ok(())
@@ -480,7 +480,7 @@ impl Owner {
                         |next| {
                             if next != &self.settings {
                                 jack_core::settings::save(&self.settings_path, next)
-                                    .map_err(|error| error.to_string())?;
+                                    .map_err(|error| format!("Settings save failed: {error}"))?;
                             }
                             Ok(())
                         },
@@ -494,9 +494,16 @@ impl Owner {
                 self.sonar.refresh(true);
             }
             Action::OutputSync { enabled } => {
-                let mut next = self.settings.clone();
-                next.link_group_outputs = enabled;
-                self.preferences(next)?;
+                let next = crate::group_outputs::set_linked(
+                    &mut self.sonar,
+                    &self.settings,
+                    enabled,
+                    |next| {
+                        jack_core::settings::save(&self.settings_path, next)
+                            .map_err(|error| format!("Settings save failed: {error}"))
+                    },
+                )?;
+                self.settings = next;
             }
             Action::Separation { enabled } => {
                 if !enabled {
@@ -1032,11 +1039,13 @@ fn read_startup() -> Result<Option<String>, String> {
     if status == ERROR_FILE_NOT_FOUND {
         return Ok(None);
     }
-    status.ok().map_err(|e| e.to_string())?;
+    status
+        .ok()
+        .map_err(|e| format!("Windows startup read failed: {e}"))?;
     let len = (bytes as usize / 2).saturating_sub(1);
     String::from_utf16(&data[..len])
         .map(Some)
-        .map_err(|e| e.to_string())
+        .map_err(|e| format!("Windows startup read failed: {e}"))
 }
 fn write_startup(value: Option<&str>) -> Result<(), String> {
     let status = match value {
@@ -1058,7 +1067,9 @@ fn write_startup(value: Option<&str>) -> Result<(), String> {
     if status == ERROR_FILE_NOT_FOUND || status == ERROR_SUCCESS {
         Ok(())
     } else {
-        status.ok().map_err(|e| e.to_string())
+        status
+            .ok()
+            .map_err(|e| format!("Windows startup write failed: {e}"))
     }
 }
 

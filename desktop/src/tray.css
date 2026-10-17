@@ -46,4 +46,4 @@
 
 
 
-.quick-panel .sonar-percent { font-size:15px; line-height:20px; font-weight:400; letter-spacing:-.3px; }
+.quick-panel .sonar-percent,.quick-panel .output-unavailable { font-size:15px; line-height:20px; font-weight:400; letter-spacing:-.3px; }

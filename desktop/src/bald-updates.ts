@@ -2,6 +2,7 @@
 import { getVersion } from '@tauri-apps/api/app';
 import { invoke } from '@tauri-apps/api/core';
 import { cssTimeMs } from './motion-time';
+import { userError } from './user-error';
 import './bald-updates.css';
 
 let toastTimer:ReturnType<typeof setTimeout>|undefined;
@@ -53,6 +54,6 @@ async function checkForUpdates() {
     await invoke('install_jack_update');
     showToast(currentEnglish()?'Update installed.':'업데이트가 설치되었습니다.');
   } catch(error) {
-    showToast(`${currentEnglish()?'Update failed':'업데이트 실패'}:\n${error}`);
+    showToast(`${currentEnglish()?'Update failed':'업데이트 실패'}: ${userError(error,currentEnglish())}`);
   } finally {updating=false;redraw();}
 }

@@ -9,9 +9,16 @@ export function applyPreviewAction(state:ViewState, action:Record<string,unknown
       next.settings.language=String(action.language);
       next.settings.launch_at_login=Boolean(action.launch_at_login);
       break;
-    case 'output_sync':
+    case 'output_sync': {
       next.settings.link_group_outputs=Boolean(action.enabled);
+      if(next.settings.link_group_outputs && !state.settings.link_group_outputs) {
+        if(!next.separation_available)throw new Error('Preview Sonar is not ready');
+        const game=next.sonar.routes.find(route=>route.channel==='game');
+        if(!game)throw new Error('Preview Gaming output is not ready');
+        return applyPreviewAction(next,{kind:'sonar',command:{operation:'route',channel:'game',device_id:game.device_id,expected:game.device_id}},reset);
+      }
       break;
+    }
     case 'tray_volume_numbers':
       next.settings.tray_volume_numbers_always_visible=Boolean(action.enabled);
       break;
@@ -54,6 +61,16 @@ export function applyPreviewAction(state:ViewState, action:Record<string,unknown
       const activeChannels=new Set(next.settings.groups?.map(group=>group.sonar_channel) ?? ['game','chat','media']);
       for(const target of next.sonar.routes) {
         if(target.channel===command.channel || (!microphone && next.settings.link_group_outputs && activeChannels.has(target.channel))) {
+          if(!microphone) {
+            const group=next.settings.groups?.find(group=>group.sonar_channel===target.channel);
+            const volume=next.sonar.volumes.find(volume=>volume.channel===target.channel);
+            if(group && volume) {
+              const saved=group.device_volumes??={};
+              if(target.device_id)saved[target.device_id]=volume.volume;
+              volume.volume=saved[device.id]??volume.volume;
+              saved[device.id]=volume.volume;
+            }
+          }
           target.device_id=device.id;target.device_name=device.name;
         }
       }

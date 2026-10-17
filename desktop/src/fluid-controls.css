@@ -30,7 +30,7 @@
 @media(hover:hover) { .sonar-device-picker:has(.sonar-output-open:hover:not(:disabled))>.sonar-picker-surface { background:var(--group-surface); } }
 .sonar-device-picker:has(.sonar-output-open[aria-expanded=true])>.sonar-picker-surface { background:var(--group-surface); }
 .sonar-channel[data-output-unavailable=true] .sonar-channel-title,
-.sonar-channel[data-output-unavailable=true] .volume-content,
-.sonar-channel[data-output-unavailable=true] .sonar-output-open>.icon,
 .sonar-channel[data-output-unavailable=true] .sonar-app { opacity:.35; }
+.device-row[data-volume-unavailable] :is(.icon,.device-name) { opacity:.35; }
+.sonar-output-open:disabled>.icon { opacity:.35; }
 @media(prefers-reduced-motion:reduce) { .sonar-picker-surface { transition:none; } }

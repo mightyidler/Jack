@@ -21,6 +21,42 @@ test('preview linked outputs change together while microphone and original state
   assert.deepEqual(state,before);
 });
 
+test('enabling output sync adopts Gaming and restores saved volume for each group including zero',()=>{
+  const state=fixture();state.settings.link_group_outputs=false;
+  state.settings.groups.push({id:'aux',display_name:'aux',sonar_channel:'aux'});
+  state.sonar.routes.push({channel:'aux',device_id:'second',device_name:'Headphones'});
+  state.sonar.devices.push({id:'first',name:'Speakers',role:'playback',enabled:true});
+  for(const [index,group] of state.settings.groups.entries()) {
+    group.device_volumes={first:[.1,0,.28,.84][index]};
+    state.sonar.volumes.push({channel:group.sonar_channel,volume:.63,muted:group.sonar_channel==='aux'});
+    if(group.sonar_channel!=='game')state.sonar.routes.find(route=>route.channel===group.sonar_channel).device_id='second';
+  }
+  const before=structuredClone(state);
+  const next=applyPreviewAction(state,{kind:'output_sync',enabled:true},fixture);
+  assert.equal(next.settings.link_group_outputs,true);
+  assert.deepEqual(next.sonar.routes.map(route=>route.device_id),['first','first','first','mic','first']);
+  assert.deepEqual(next.sonar.volumes.map(volume=>volume.volume),[.63,.63,0,.28,.84]);
+  assert.equal(next.sonar.volumes.at(-1).muted,true);
+  for(const group of next.settings.groups.slice(1))assert.equal(group.device_volumes.second,.63);
+  assert.deepEqual(state,before);
+  const off=applyPreviewAction(next,{kind:'output_sync',enabled:false},fixture);
+  assert.deepEqual(off.sonar,next.sonar);
+});
+
+test('enabling sync preserves current volume for same or unremembered devices and rejects unavailable Gaming',()=>{
+  const state=fixture();state.settings.link_group_outputs=false;
+  state.sonar.devices.push({id:'first',name:'Speakers',role:'playback',enabled:true});
+  state.sonar.volumes.push(...['game','chat','media'].map(channel=>({channel,volume:.4,muted:false})));
+  state.settings.groups[1].device_volumes={first:0};
+  state.sonar.routes[2].device_id='second';
+  const next=applyPreviewAction(state,{kind:'output_sync',enabled:true},fixture);
+  assert.deepEqual(next.sonar.volumes.map(volume=>volume.volume),[.63,.4,.4,.4]);
+  state.separation_available=false;
+  assert.throws(()=>applyPreviewAction(state,{kind:'output_sync',enabled:true},fixture),/not ready/);
+  state.separation_available=true;state.sonar.routes=state.sonar.routes.filter(route=>route.channel!=='game');
+  assert.throws(()=>applyPreviewAction(state,{kind:'output_sync',enabled:true},fixture),/Gaming/);
+});
+
 test('preview microphone volume memory is independent, preserves zero, and leaves input state intact',()=>{
   const original=fixture();original.sonar.devices.push({id:'other-mic',name:'Other microphone',role:'capture',enabled:true});
   const before=structuredClone(original);

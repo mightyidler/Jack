@@ -10,7 +10,11 @@ import { captureAppGroups, animateAppGroups } from './app-group-motion';
 import { OutputGroupMotion } from './output-group-motion';
 import { LiveVolume } from './live-volume';
 import { singleFlight } from './single-flight';
-import { deviceLabel } from './device-name';
+import { deviceLabel, deviceLabels } from './device-name';
+import { userError } from './user-error';
+import { controlsKey, applicationsKey, layoutKey } from './view-update';
+import { VolumeWheel } from './volume-wheel';
+import { outputVolume } from './output-volume';
 import './app-drag.css';
 import './tray.css';
 import './scrollbars.css';
@@ -38,7 +42,7 @@ import './input-selection-motion.css';
 
 type Flow = 'render' | 'capture';
 export type Theme = 'system' | 'dark' | 'light';
-interface Group { id:string; display_name:string; sonar_channel?:OutputGroup|null; icon_asset_id?:string|null }
+interface Group { id:string; display_name:string; sonar_channel?:OutputGroup|null; icon_asset_id?:string|null; device_volumes?:Record<string,number> }
 interface TrayShortcut { enabled:boolean; key:string|null; modifiers:number }
 interface Settings { theme: Theme; language: string; launch_at_login: boolean; channel_separation_enabled: boolean; link_group_outputs: boolean; groups?: Group[]; tray_shortcut?:TrayShortcut; tray_volume_numbers_always_visible?:boolean; microphone_device_volumes?:Record<string,number> }
 interface Endpoint { id: string; name: string; flow: Flow; form_factor: number | null; defaults: string[]; volume: {level: number; muted: boolean} | null }
@@ -84,13 +88,21 @@ let shortcutRecording=false;
 let shortcutCaptureReady=false;
 let cancelDrag: (() => void) | null = null;
 const volumeMotions=new Map<string,VolumeMotion>();
+const volumeBindings=new Map<string,{channel:Channel;apply:(level:number,muted:boolean)=>void}>();
 let previousVolumeMotions=new Map<string,ReturnType<VolumeMotion['snapshot']>>();
 function retireVolumeMotions() {
   previousVolumeMotions=new Map([...volumeMotions].map(([key,motion])=>[key,motion.snapshot()]));
   volumeMotions.forEach(motion=>motion.dispose());
   volumeMotions.clear();
+  volumeBindings.clear();
 }
 let error = '';
+function showError(reason:unknown) {
+  error=userError(reason,state?.settings.language==='en');showToast(error);return error;
+}
+function deviceName(id:string,raw:string) {
+  return deviceLabels(state!.sonar.devices.filter(device=>device.enabled)).get(id)??deviceLabel(raw);
+}
 let visible = true;
 let reported = false;
 let revision = 0;
@@ -106,6 +118,75 @@ let cancelQuickPreparation:(()=>void)|null=null;
 let desiredQuickHeight=0;
 let appliedQuickHeight=0;
 let quickSizeFlight: Promise<void> | null=null;
+let renderedControls='';
+let renderedApplications='';
+let renderedLayout='';
+const renderedDevices=new Map<string,string>();
+function currentApplicationsKey() {return state?JSON.stringify([applicationsKey(state),applicationOrder.serialize()]):'';}
+function deviceControlKey(channel:Channel) {
+  const role=channel==='microphone'?'capture':'playback';
+  return JSON.stringify([state!.sonar.routes.filter(route=>route.channel===channel),state!.sonar.devices.filter(device=>device.role===role),
+    state!.audio.endpoints.filter(device=>device.flow===(role==='capture'?'capture':'render')).map(({id,name,form_factor})=>[id,name,form_factor]),
+    channel==='microphone'?!!state!.sonar.volumes.find(volume=>volume.channel===channel):outputVolume(state!,channel).available]);
+}
+function rememberRendered() {
+  renderedControls=state?controlsKey(state):'';
+  renderedApplications=currentApplicationsKey();
+  renderedLayout=state?layoutKey(state):'';
+  if(state)for(const channel of ['game','chat','media','aux','microphone'] as Channel[])renderedDevices.set(channel,deviceControlKey(channel));
+}
+function patchVolumes() {
+  if(!state)return;
+  for(const binding of volumeBindings.values()) {
+    const volume=state.sonar.volumes.find(volume=>volume.channel===binding.channel);
+    if(volume)binding.apply(volume.volume,volume.muted);
+  }
+  for(const row of app.querySelectorAll<HTMLElement>('[data-input-device]:not(.selected)')) {
+    const level=state.settings.microphone_device_volumes?.[row.dataset.inputDevice!];
+    if(level===undefined)continue;
+    const fill=row.querySelector<HTMLElement>('.volume-fill');if(fill)fill.style.transform=`scaleX(${level})`;
+    const percent=row.querySelector('.sonar-percent');if(percent)percent.textContent=`${Math.round(level*100)}%`;
+  }
+}
+function applyState(next:ViewState) {
+  const incremental=renderedControls!=='' && renderedLayout===layoutKey(next);
+  const devicesChanged=renderedControls!==controlsKey(next);
+  state=next;
+  if(dragging || windowDragging || shortcutRecording)return;
+  if(!incremental){render();return;}
+  if(devicesChanged && quick && quickOutputGroup){render();return;}
+  if(devicesChanged)patchDevices();
+  patchVolumes();
+  if(!quick && tab==='render' && renderedApplications!==currentApplicationsKey())patchApplications();
+  rememberRendered();
+}
+function patchDevices() {
+  dismissOutputMenu?.();
+  const root=quick?app.querySelector<HTMLElement>('.quick-stage>.quick-content:not([aria-hidden=true])'):document.getElementById('panel');
+  if(!root)return;
+  const focused=(document.activeElement as HTMLElement)?.id;
+  const devicePaint=captureDevicePaint(root),inputSelection=captureInputSelection(root),divider=captureDividerOpacity(root);
+  for(const card of root.querySelectorAll<HTMLElement>('.sonar-channel[data-channel]')) {
+    const channel=card.dataset.channel as OutputGroup;
+    if(renderedDevices.get(channel)===deviceControlKey(channel))continue;
+    const key=JSON.stringify([channel,null]);
+    previousVolumeMotions.delete(key);volumeMotions.get(key)?.dispose();volumeMotions.delete(key);
+    volumeBindings.delete(`sonar-volume-${channel}`);
+    card.dataset.outputUnavailable=String(!outputVolume(state!,channel).available);
+    card.querySelector('.sonar-device-control')?.replaceWith(outputDeviceControl(channel));
+  }
+  const list=root.querySelector<HTMLElement>('[data-input-list=capture]');
+  if(list && renderedDevices.get('microphone')!==deviceControlKey('microphone')) {
+    for(const [key,motion] of volumeMotions)if(JSON.parse(key)[0]==='microphone'){motion.dispose();volumeMotions.delete(key);previousVolumeMotions.delete(key);}
+    for(const [key,binding] of volumeBindings)if(binding.channel==='microphone')volumeBindings.delete(key);
+    list.replaceWith(deviceList('capture',false).querySelector('[data-input-list=capture]')!);
+  }
+  animateDeviceChange(root,devicePaint);animateInputSelection(root,inputSelection);animateDividerOpacity(root,divider);
+  if(focused)document.getElementById(focused)?.focus({preventScroll:true});
+  if(quick) {
+    cancelQuickPreparation?.();cancelQuickPreparation=null;quickSurface?.clearPrepared();quickPreparationKey='';scheduleQuickOutputPreparation();
+  }
+}
 interface QuickLayout { anchor:number; origin:number }
 function applyQuickLayout(layout:QuickLayout) {
   document.documentElement.style.setProperty('--quick-anchor-y',`${layout.anchor}px`);
@@ -120,7 +201,7 @@ function resizeQuickTo(contentHeight: number): Promise<void> {
         const height=desiredQuickHeight;
         applyQuickLayout(await invoke<QuickLayout>('resize_quick',{height})); appliedQuickHeight=height;
       }
-    })().catch(reason=>{error=String(reason);throw reason;}).finally(()=>{quickSizeFlight=null;});
+    })().catch(reason=>{showError(reason);throw reason;}).finally(()=>{quickSizeFlight=null;});
   }
   return quickSizeFlight;
 }
@@ -183,6 +264,7 @@ async function act(action: Record<string, unknown>) {
   const focusId = (document.activeElement as HTMLElement)?.id;
   busy = true; error = ''; updateDisabled();
   let succeeded=true;
+  let nextState=state;
   if(action.kind==='sonar_retry') {
     const retry=app.querySelector<HTMLButtonElement>('[data-sonar-retry]');
     if(retry) {
@@ -193,19 +275,28 @@ async function act(action: Record<string, unknown>) {
   try {
     if (interactivePreview && state) {
       const { applyPreviewAction } = await import('./preview-actions');
-      state = applyPreviewAction(state,action,fixture);
-      if((action.kind==='tray_volume_numbers' || action.kind==='reset') && parent!==window)parent.postMessage({type:'jack-preview-volume-numbers',enabled:!!state.settings.tray_volume_numbers_always_visible},location.origin);
-    } else state = await invoke<ViewState>('audio_action',{action});
+      nextState = applyPreviewAction(state,action,fixture);
+      if((action.kind==='tray_volume_numbers' || action.kind==='reset') && parent!==window)parent.postMessage({type:'jack-preview-volume-numbers',enabled:!!nextState.settings.tray_volume_numbers_always_visible},location.origin);
+    } else nextState = await invoke<ViewState>('audio_action',{action});
   }
-  catch (e) { succeeded=false; error = String(e); showToast(error); if (native) try { state = await invoke<ViewState>('audio_action',{action:{kind:'read'}}); } catch { /* preserve the original error */ } }
-  finally { busy = false; render(); if (focusId) document.getElementById(focusId)?.focus({preventScroll:true}); }
+  catch (e) { succeeded=false; showError(e); if (native) try { nextState = await invoke<ViewState>('audio_action',{action:{kind:'read'}}); } catch { /* preserve the original error */ } }
+  finally {
+    busy=false;updateDisabled();
+    // Failed controls may still carry their optimistic switch/capture paint.
+    if(!succeeded){state=nextState;render();}else if(nextState)applyState(nextState);else render();
+    if(focusId)document.getElementById(focusId)?.focus({preventScroll:true});
+  }
   return succeeded;
 }
 function updateDisabled() { app.querySelectorAll<HTMLButtonElement | HTMLSelectElement>('[data-control]').forEach(el => {
   if (el.id === 'group-add') {
     // Busy actions are already rejected by act(); keep the button's paint stable.
     el.setAttribute('aria-disabled',String(el.disabled || busy || !controlsAvailable));
-  } else el.disabled = busy || !controlsAvailable;
+  } else if(busy) {
+    el.dataset.disabledBeforeAction=String(el.disabled);el.disabled=true;
+  } else if(el.dataset.disabledBeforeAction!==undefined) {
+    el.disabled=el.dataset.disabledBeforeAction==='true' || !controlsAvailable;delete el.dataset.disabledBeforeAction;
+  }
 }); }
 function control<T extends HTMLButtonElement | HTMLSelectElement>(el: T) { el.dataset.control = ''; el.disabled = busy || !controlsAvailable; return el; }
 function retryButton(action:()=>void,sonar=false) {
@@ -346,6 +437,7 @@ function render() {
   animateDeviceChange(content,devicePaint);
   animateInputSelection(content,inputSelection);
   if (focused) document.getElementById(focused)?.focus({preventScroll:true});
+  rememberRendered();
 }
 function renderSettings(content: HTMLElement) {
   const m = t(); const s = state!.settings;
@@ -386,7 +478,7 @@ function renderSettings(content: HTMLElement) {
   numbersToggle.id='tray-volume-numbers-toggle';numbersToggle.setAttribute('aria-describedby',numbersHint.id);numbersRow.append(numbersDescription,numbersToggle);
   envCard.append(selectRow(m.language,'language-select',['ko','en'],['한국어','English'],s.language,v => preferences({language:v})),element('div','setting-divider'),selectRow(m.theme,'theme-select',['system','light','dark'],[m.system,m.light,m.dark],s.theme,v => preferences({theme:v as Theme})),element('div','setting-divider'),numbersRow); env.append(envCard);
   const ops = element('div','card operations'); const reset = control(button(m.reset,'operation danger',resetDialog)); reset.id = 'reset-button';
-  const quit = button(m.quit,'operation',() => { if (native && !busy) void invoke('quit').catch(e => { error = String(e); showToast(error); render(); }); }); quit.disabled = !native; ops.append(reset,element('div','setting-divider'),quit); content.append(startup,shortcuts,env,updateSection(english,native,render,()=>state?.settings.language==='en'),ops);
+  const quit = button(m.quit,'operation',() => { if (native && !busy) void invoke('quit').catch(e => { showError(e); render(); }); }); quit.disabled = !native; ops.append(reset,element('div','setting-divider'),quit); content.append(startup,shortcuts,env,updateSection(english,native,render,()=>state?.settings.language==='en'),ops);
 }
 function shortcutLabel(shortcut:TrayShortcut,english:boolean) {
   if(!shortcut.key)return english?'Set shortcut':'단축키 지정';
@@ -401,7 +493,7 @@ async function recordShortcut(button:HTMLButtonElement) {
     if (native) await invoke('shortcut_recording',{recording:true});
     if(shortcutRecording)shortcutCaptureReady=true;
     else if (native) await invoke('shortcut_recording',{recording:false});
-  } catch(reason) {shortcutRecording=false;error=String(reason);render();}
+  } catch(reason) {shortcutRecording=false;showError({code:'shortcut',detail:reason});render();}
 }
 async function finishShortcutRecording(binding?:TrayShortcut) {
   if(!shortcutRecording)return;
@@ -413,7 +505,7 @@ async function finishShortcutRecording(binding?:TrayShortcut) {
     if(binding)await act({kind:'tray_shortcut',...binding});
     if (native) await invoke('shortcut_recording',{recording:false});
     if(!binding)render();
-  } catch(reason){error=String(reason);render();}
+  } catch(reason){showError({code:'shortcut',detail:reason});render();}
 }
 function resetDialog() {
   const m=t(); const dialog=element('dialog','confirm-dialog'); dialog.setAttribute('aria-labelledby','reset-title');
@@ -450,10 +542,11 @@ function deviceList(flow: Flow, heading = true) {
     row.dataset.deviceMotionKey=JSON.stringify([flow,device.id]);
     row.disabled ||= !state!.separation_available || !route;
     row.dataset.endpoint = device.id;
-    row.classList.toggle('selected',active); row.title = deviceLabel(device.name);
+    row.dataset.inputDevice=device.id;
+    row.classList.toggle('selected',active); row.title = device.name;
     // Device IDs and availability come from GG; Windows metadata only supplies the icon shape.
     const image = icon('Mic',quick ? 20 : 24);
-    const label = element('span','device-name',deviceLabel(device.name));
+    const label = element('span','device-name',deviceName(device.id,device.name));
     const check=document.createElementNS('http://www.w3.org/2000/svg','svg');
     check.classList.add('check','input-selection-check');check.setAttribute('viewBox','0 0 24 24');check.setAttribute('aria-hidden','true');
     const checkPath=document.createElementNS('http://www.w3.org/2000/svg','path');
@@ -525,6 +618,114 @@ function playbackIcon(name: string, size: IconSize = quick ? 20 : 24) {
   const factor = matches.length === 1 ? matches[0].form_factor : null;
   return icon(factor === 9 ? 'Desktop' : factor === 1 ? 'Speaker' : 'Headphones',size);
 }
+function applicationBuckets() {
+  const routing=state!.app_routing??[];
+  const routingByProcess=new Map(routing.map(entry=>[entry.process_id,entry]));
+  const applications=state!.sonar.applications.filter(session=>routingByProcess.get(session.process_id)?.stable_id ||
+    [session.display_name,session.process_name].some(name=>name.trim() && !/^unk(?:nown|own)$/i.test(name.trim())));
+  const partition=partitionApplications(applications,routing,configuredGroups().map(group=>group.channel));
+  const applicationsByChannel=new Map([...partition.channels].map(([channel,items])=>[
+    channel,applicationOrder.sort(channel,items,application=>applicationOrderKey(application,routingByProcess)),
+  ]));
+  return {routingByProcess,applicationsByChannel,otherApplications:applicationOrder.sort('other',partition.other,application=>applicationOrderKey(application,routingByProcess))};
+}
+function applicationList(channel:string,items:ApplicationGroup[],routing:ReadonlyMap<number,AppRoute>) {
+  const list=element('div','sonar-app-list');list.dataset.appBucket=channel;
+  list.dataset.contentsKey=JSON.stringify(items.map(item=>[item,item.process_ids.map(pid=>routing.get(pid))]));
+  for(const item of items) {
+    if(list.childElementCount)list.append(element('div','sonar-app-divider'));
+    list.append(sonarApplication(item,groupLabels(),routing));
+  }
+  return list;
+}
+function patchApplications() {
+  const section=app.querySelector<HTMLElement>('#panel .sonar-channels');if(!section)return;
+  const focused=(document.activeElement as HTMLElement)?.id;
+  const before=captureAppGroups(section);
+  const {routingByProcess,applicationsByChannel,otherApplications}=applicationBuckets();
+  for(const list of section.querySelectorAll<HTMLElement>('[data-app-bucket]')) {
+    const channel=list.dataset.appBucket!;
+    const items=channel==='other'?otherApplications:applicationsByChannel.get(channel)??[];
+    const key=JSON.stringify(items.map(item=>[item,item.process_ids.map(pid=>routingByProcess.get(pid))]));
+    if(list.dataset.contentsKey!==key) {
+      const next=applicationList(channel,items,routingByProcess);
+      list.replaceChildren(...next.childNodes);list.dataset.contentsKey=key;
+    }
+  }
+  let other=section.querySelector<HTMLElement>('[data-other-applications]');
+  if(!otherApplications.length)other?.remove();
+  else if(!other) {
+    other=element('div','card sonar-channel');other.dataset.otherApplications='';
+    other.append(element('h2','item-title',state!.settings.language==='en'?'Other applications':'다른 앱'),applicationList('other',otherApplications,routingByProcess));
+    section.insertBefore(other,section.querySelector('.sonar-group-add'));
+  }
+  animateAppGroups(section,before);
+  if(focused)document.getElementById(focused)?.focus({preventScroll:true});
+}
+function outputDeviceControl(channel:OutputGroup) {
+  const sonar=state!.sonar,english=state!.settings.language==='en',labels=groupLabels();
+  const sourceAvailable=sonar.sources.some(source=>source.channel===channel);
+  const volume=sonar.volumes.find(volume=>volume.channel===channel);
+  const route=sonar.routes.find(route=>route.channel===channel);
+  const output=outputVolume(state!,channel),outputAvailable=output.available;
+  // A disconnected selection must not disable access to replacement devices.
+  const pickerAvailable=sourceAvailable && !!route;
+  const level=output.level??0;
+  const row = control(button('','device-row selected',() => {})); row.id = `sonar-volume-${channel}`;
+  row.dataset.deviceMotionKey=JSON.stringify(['output',channel]);
+  row.dataset.endpoint=route?.device_id??'';
+  row.dataset.deviceMotionOrder=JSON.stringify(sonar.devices.filter(device=>device.role==='playback' && device.enabled).map(device=>device.id));
+  row.disabled ||= !outputAvailable;
+  const name = route?.device_name ?? (english ? 'Output disconnected' : '출력 장치 연결 해제');
+  row.title=name;
+  const fill = element('span','volume-fill'); fill.style.width = `${level * 100}%`;
+  const deviceIcon=playbackIcon(name),deviceText=element('span','device-name',deviceName(route?.device_id??'',name));
+  if(!quick) {
+    const drum=element('span','device-drum'),face=element('span','device-drum-face');
+    face.append(deviceIcon,deviceText);drum.append(face);row.append(fill,drum);
+    row.dataset.deviceDrumItems=JSON.stringify(sonar.devices.filter(device=>device.role==='playback' && device.enabled).map(device=>({
+      id:device.id,label:deviceName(device.id,device.name),icon:playbackIcon(device.name).dataset.iconAsset!,
+    })));
+  } else row.append(fill,deviceIcon,deviceText);
+  if(!outputAvailable) {
+    const status=output.disconnected?(english?'Disconnected':'연결 해제'):(english?'Unavailable':'사용 불가');
+    row.dataset.volumeUnavailable='';
+    row.append(element('span','output-unavailable',status));
+    const remembered=output.level===null?'':(english?` · Last volume ${Math.round(level*100)}%`:` · 마지막 볼륨 ${Math.round(level*100)}%`);
+    row.setAttribute('aria-label',`${labels[channel]} · ${name} · ${status}${remembered}`);
+    row.title+=` · ${status}${remembered}`;
+  } else row.append(element('span','sonar-percent',`${Math.round(level * 100)}%`));
+  if (!native && import.meta.env.DEV && params.has('live-volume')) row.disabled = !outputAvailable;
+  if(outputAvailable)bindVolume(row,fill,{id:channel,name:labels[channel],flow:'render',form_factor:null,defaults:[],volume:{level,muted:volume?.muted ?? false}},channel);
+  else {
+    const content=element('span','volume-content');
+    [...row.children].filter(child=>child!==fill).forEach(child=>content.append(child));
+    const surface=element('span','volume-surface');surface.append(fill);
+    const clip=element('span','volume-surface-clip');clip.setAttribute('aria-hidden','true');clip.append(surface);row.append(clip,content);
+  }
+  const deviceControl=element('div','sonar-device-control');deviceControl.append(row);
+  {
+    const wrapper = element('div','sonar-device-picker');
+    if (quick) {
+      const open = button('','sonar-output-open',() => { quickOutputGroup = channel; renderQuick(); document.getElementById('quick-output-back')?.focus(); });
+      open.disabled = busy || !pickerAvailable;
+      open.id = `sonar-output-${channel}`; open.setAttribute('aria-label',`${labels[channel]} ${t().outputs}`); open.append(chevron('right',20)); wrapper.append(open);
+    } else {
+      let openedBeforePointer = false;
+      const open = button('','sonar-output-open',() => {
+        if (openedBeforePointer) { dismissOutputMenu?.(); openedBeforePointer = false; return; }
+        openOutputMenu(channel,open);
+      });
+      open.addEventListener('pointerdown',() => openedBeforePointer = open.getAttribute('aria-expanded') === 'true',{capture:true});
+      open.disabled = busy || !pickerAvailable; open.id = `sonar-output-${channel}`;
+      open.setAttribute('aria-label',`${labels[channel]} ${t().outputs}`); open.setAttribute('aria-haspopup','dialog'); open.setAttribute('aria-expanded','false');
+      open.append(chevron('down',24)); wrapper.append(open);
+    }
+    deviceControl.append(wrapper);
+    bindFluidControls(deviceControl);
+  }
+  return deviceControl;
+}
 function sonarChannels(showApplications = true) {
   const english = state!.settings.language === 'en';
   const sonar = state!.sonar;
@@ -533,31 +734,11 @@ function sonarChannels(showApplications = true) {
   if (showApplications) section.append(sectionLabel(english ? 'Audio groups' : '오디오 그룹'));
   const labels = groupLabels();
   const groups = configuredGroups();
-  const routingByProcess = new Map<number,AppRoute>();
-  let applicationsByChannel = new Map<string,ApplicationGroup[]>();
-  let otherApplications:ApplicationGroup[]=[];
-  if (showApplications) {
-    const routing = state!.app_routing ?? [];
-    for (const entry of routing) routingByProcess.set(entry.process_id,entry);
-    // Unidentified sessions are internal inventory entries, not useful app controls.
-    const applications=sonar.applications.filter(session =>
-      routingByProcess.get(session.process_id)?.stable_id ||
-      [session.display_name,session.process_name].some(name => name.trim() && !/^unk(?:nown|own)$/i.test(name.trim())));
-    const partition=partitionApplications(applications,routing,groups.map(group=>group.channel));
-    applicationsByChannel=partition.channels;otherApplications=partition.other;
-    for(const [channel,items] of applicationsByChannel) {
-      applicationsByChannel.set(channel,applicationOrder.sort(channel,items,application=>applicationOrderKey(application,routingByProcess)));
-    }
-    otherApplications=applicationOrder.sort('other',otherApplications,application=>applicationOrderKey(application,routingByProcess));
-  }
+  const {routingByProcess,applicationsByChannel,otherApplications}=applicationBuckets();
   for (const group of groups) {
-    const channel = group.channel;
-    const sourceAvailable = sonar.sources.some(s => s.channel === channel);
-    const volume = sonar.volumes.find(v => v.channel === channel);
-    const route = sonar.routes.find(r => r.channel === channel);
-    const outputAvailable=sourceAvailable && !!volume && !!route && sonar.devices.some(device=>device.id===route.device_id && device.role==='playback' && device.enabled);
-    const pickerAvailable=sourceAvailable && !!route && sonar.devices.some(device=>device.role==='playback' && device.enabled);
-    const level=outputAvailable?volume!.volume:0;
+    const channel=group.channel;
+    const sourceAvailable=sonar.sources.some(source=>source.channel===channel);
+    const outputAvailable=outputVolume(state!,channel).available;
     const card = element('div','card sonar-channel');
     card.dataset.channel=channel;card.dataset.dropDisabled=String(!sourceAvailable);
     card.dataset.outputUnavailable=String(!outputAvailable);
@@ -569,66 +750,18 @@ function sonarChannels(showApplications = true) {
       remove.id = `group-remove-${group.id}`; remove.setAttribute('aria-label',english ? `Delete ${labels[channel]} group` : `${labels[channel]} 그룹 삭제`); remove.append(icon('X',16)); head.append(remove);
     }
     card.append(head);
-    {
-      const row = control(button('','device-row selected',() => {})); row.id = `sonar-volume-${channel}`;
-      row.dataset.deviceMotionKey=JSON.stringify(['output',channel]);
-      row.dataset.endpoint=route?.device_id??'';
-      row.dataset.deviceMotionOrder=JSON.stringify(sonar.devices.filter(device=>device.role==='playback' && device.enabled).map(device=>device.id));
-      row.disabled ||= !outputAvailable;
-      const name = route?.device_name ?? (english ? 'Output disconnected' : '출력 장치 연결 해제');
-      const fill = element('span','volume-fill'); fill.style.width = `${level * 100}%`;
-      const deviceIcon=playbackIcon(name),deviceName=element('span','device-name',deviceLabel(name));
-      if(!quick) {
-        const drum=element('span','device-drum'),face=element('span','device-drum-face');
-        face.append(deviceIcon,deviceName);drum.append(face);row.append(fill,drum);
-        row.dataset.deviceDrumItems=JSON.stringify(sonar.devices.filter(device=>device.role==='playback' && device.enabled).map(device=>({
-          id:device.id,label:deviceLabel(device.name),icon:playbackIcon(device.name).dataset.iconAsset!,
-        })));
-      } else row.append(fill,deviceIcon,deviceName);
-      row.append(element('span','sonar-percent',`${Math.round(level * 100)}%`));
-      if (!native && import.meta.env.DEV && params.has('live-volume')) row.disabled = !outputAvailable;
-      bindVolume(row,fill,{id:channel,name:labels[channel],flow:'render',form_factor:null,defaults:[],volume:{level,muted:volume?.muted ?? false}},channel);
-      const deviceControl=element('div','sonar-device-control');deviceControl.append(row);card.append(deviceControl);
-      {
-        const wrapper = element('div','sonar-device-picker');
-        if (quick) {
-          const open = button('','sonar-output-open',() => { quickOutputGroup = channel; renderQuick(); document.getElementById('quick-output-back')?.focus(); });
-          open.disabled = busy || !pickerAvailable;
-          open.id = `sonar-output-${channel}`; open.setAttribute('aria-label',`${labels[channel]} ${t().outputs}`); open.append(chevron('right',20)); wrapper.append(open);
-        } else {
-          let openedBeforePointer = false;
-          const open = button('','sonar-output-open',() => {
-            if (openedBeforePointer) { dismissOutputMenu?.(); openedBeforePointer = false; return; }
-            openOutputMenu(channel,open);
-          });
-          open.addEventListener('pointerdown',() => openedBeforePointer = open.getAttribute('aria-expanded') === 'true',{capture:true});
-          open.disabled = busy || !pickerAvailable; open.id = `sonar-output-${channel}`;
-          open.setAttribute('aria-label',`${labels[channel]} ${t().outputs}`); open.setAttribute('aria-haspopup','dialog'); open.setAttribute('aria-expanded','false');
-          open.append(chevron('down',24)); wrapper.append(open);
-        }
-        deviceControl.append(wrapper);
-        bindFluidControls(deviceControl);
-      }
-    }
+    card.append(outputDeviceControl(channel));
     if (showApplications) {
-      const applications = element('div','sonar-app-list');
-      for (const application of applicationsByChannel.get(channel) ?? []) {
-        if (applications.childElementCount) applications.append(element('div','sonar-app-divider'));
-        applications.append(sonarApplication(application,labels,routingByProcess));
-      }
+      const applications=applicationList(channel,applicationsByChannel.get(channel)??[],routingByProcess);
       card.append(applications);
     }
     section.append(card);
   }
   if (showApplications) {
     if(otherApplications.length) {
-      const card=element('div','card sonar-channel');
+      const card=element('div','card sonar-channel');card.dataset.otherApplications='';
       card.append(element('h2','item-title',english?'Other applications':'다른 앱'));
-      const applications=element('div','sonar-app-list');
-      for(const application of otherApplications) {
-        if(applications.childElementCount)applications.append(element('div','sonar-app-divider'));
-        applications.append(sonarApplication(application,labels,routingByProcess));
-      }
+      const applications=applicationList('other',otherApplications,routingByProcess);
       card.append(applications);section.append(card);
     }
     if(groups.length < 4) {
@@ -660,8 +793,8 @@ function openOutputMenu(channel: OutputGroup, trigger: HTMLButtonElement) {
     }));
     row.id = `main-output-${channel}-${device.id}`; row.dataset.endpoint = device.id;
     row.classList.toggle('route-selected',selected); row.setAttribute('aria-pressed',String(selected));
-    const name = deviceLabel(device.name);
-    row.title = name; row.append(playbackIcon(device.name),element('span','device-name',name));
+    const name = deviceName(device.id,device.name);
+    row.title = device.name; row.append(playbackIcon(device.name),element('span','device-name',name));
     if (selected) row.append(icon('Check',quick ? 20 : 24));
     list.append(row);
   }
@@ -742,17 +875,17 @@ function sonarApplication(application: ApplicationGroup, labels: Record<MixerCha
     const target=[...document.querySelectorAll<HTMLElement>('.sonar-channel[data-channel]')].find(card=>card.dataset.channel===channel);
     const visible=[...target?.querySelectorAll<HTMLElement>('.sonar-app')??[]].map(item=>item.dataset.applicationKey!);
     const undo=applicationOrder.place(channel,orderKey,before,visible);
-    if(channel===session.route) {saveApplicationOrder();render();return;}
+    if(channel===session.route) {saveApplicationOrder();if(!dragging){patchApplications();rememberRendered();}return;}
     if (!native && import.meta.env.DEV) {
       // Preview gesture/model only: no audio policy or GG requests in a browser.
       state!.sonar.applications.filter(member => application.process_ids.includes(member.process_id)).forEach(member => member.route=channel);
       state!.app_routing?.filter(member => application.process_ids.includes(member.process_id)).forEach(member => {member.requested=channel as Channel;member.origin='user';});
-      saveApplicationOrder();render();return;
+      saveApplicationOrder();if(!dragging){patchApplications();rememberRendered();}return;
     }
     if(await act({kind:'assign_application',process_id:session.process_id,process_name:session.process_name,channel,automatic:false}))saveApplicationOrder();
     else {undo();render();}
   };
-  bindAppDrag(row,{canStart:() => movable && !busy && !dragging && (native || import.meta.env.DEV),onStart:cancel => {dragging=true;cancelDrag=cancel;},onFinish:() => {dragging=false;cancelDrag=null;render();},onDrop:moveTo});
+  bindAppDrag(row,{canStart:() => movable && !busy && !dragging && (native || import.meta.env.DEV),onStart:cancel => {dragging=true;cancelDrag=cancel;},onFinish:() => {dragging=false;cancelDrag=null;if(state)applyState(state);},onDrop:moveTo});
   row.addEventListener('keydown',event => {
     if (!event.shiftKey || !['ArrowUp','ArrowDown'].includes(event.key) || !movable || busy || dragging || !controlsAvailable) return;
     const groups=configuredGroups().filter(group => state!.sonar.sources.some(source => source.channel===group.channel));
@@ -782,8 +915,8 @@ function quickOutputDevices(channel: OutputGroup) {
     }));
     row.id = `quick-output-${channel}-${device.id}`; row.dataset.endpoint = device.id;
     row.classList.toggle('route-selected',selected); row.setAttribute('aria-pressed',String(selected));
-    const name = deviceLabel(device.name);
-    row.title = name; row.append(playbackIcon(device.name),element('span','device-name',name));
+    const name = deviceName(device.id,device.name);
+    row.title = device.name; row.append(playbackIcon(device.name),element('span','device-name',name));
     if (selected) row.append(icon('Check',quick ? 20 : 24));
     list.append(row);
   }
@@ -854,15 +987,18 @@ function renderQuick() {
     body.append(inner);accordion.append(head,body);content.append(accordion);
   }
   quickSurface!.show(content,!native || visible);
+  rememberRendered();
   if(focused)document.getElementById(focused)?.focus({preventScroll:true});
 }
 function bindVolume(row: HTMLButtonElement, fill: HTMLElement, device: Endpoint, channel: Channel) {
   const volume=device.volume!;
   let next=volume.level; let pointer:number|null=null; let stream:LiveVolume|null=null;
   let bounds:DOMRect|null=null; let held=false; let releasing=false; let epoch=0;
+  const wheel=new VolumeWheel();let wheelActive=false;let wheelTimer:ReturnType<typeof setTimeout>|undefined;
   const available=()=>!row.disabled && (controlsAvailable || (import.meta.env.DEV && params.has('live-volume'))) && !busy && (!dragging || releasing);
   row.role='slider'; row.setAttribute('aria-label',`${deviceLabel(device.name)} ${t().volume}`);
   row.setAttribute('aria-valuemin','0');row.setAttribute('aria-valuemax','100');row.setAttribute('aria-valuenow',String(Math.round(next*100)));
+  row.setAttribute('aria-valuetext',`${Math.round(next*100)}%`);
   let percent=row.querySelector<HTMLElement>('.sonar-percent');
   if(!percent){percent=element('span','sonar-percent',`${Math.round(next*100)}%`);row.append(percent);}
   const inputStatus=row.querySelector<HTMLElement>('.input-volume-status');
@@ -883,10 +1019,18 @@ function bindVolume(row: HTMLButtonElement, fill: HTMLElement, device: Endpoint,
     if(value!==paintedPercent){paintedPercent=value;percent!.textContent=`${value}%`;}
   },initial);
   volumeMotions.set(motionKey,motion);motion.set(next);
+  volumeBindings.set(row.id,{channel,apply:(level,muted)=>{
+    next=level;volume.level=level;volume.muted=muted;
+    row.setAttribute('aria-valuenow',String(Math.round(level*100)));
+    row.setAttribute('aria-valuetext',`${Math.round(level*100)}%`);
+    motion.set(level);
+  }});
+  row.title+=(row.title?'\n':'')+(state?.settings.language==='en'?'Wheel: 5% · Shift+wheel: 1%':'휠: 5% · Shift+휠: 1%');
   const update=(value:number,overrun=0)=>{
     const clamped=Math.min(1,Math.max(0,value));next=Math.round(clamped*100)/100;
     updateFluidVolume(row,overrun,clamped);
     motion.set(next);row.setAttribute('aria-valuenow',String(Math.round(next*100)));
+    row.setAttribute('aria-valuetext',`${Math.round(next*100)}%`);
     stream?.set(next);
   };
   const begin=(isPointer:boolean)=>{
@@ -899,12 +1043,19 @@ function bindVolume(row: HTMLButtonElement, fill: HTMLElement, device: Endpoint,
       if(state && channel==='microphone' && state.sonar.routes.some(route=>route.channel===channel && route.device_id===device.id)) {
         (state.settings.microphone_device_volumes??={})[device.id]=actual;
       }
+      if(state && channel!=='microphone') {
+        const route=state.sonar.routes.find(route=>route.channel===channel);
+        const groupId=configuredGroups().find(group=>group.channel===channel)?.id;
+        const group=state.settings.groups?.find(group=>group.id===groupId);
+        if(route && group)(group.device_volumes??={})[route.device_id]=actual;
+      }
       return actual;
-    },failure=>{error=String(failure);showToast(error);});
+    },failure=>{showError(failure);});
     if(held){row.classList.add('adjusting');void holdFluidVolume(row,true);motion.grab();}
   };
   const end=async(flush:boolean)=>{
     const active=stream;if(!active)return;
+    clearTimeout(wheelTimer);wheelTimer=undefined;wheelActive=false;
     stream=null;const captured=pointer;pointer=null;cancelDrag=null;
     if(captured!==null && row.hasPointerCapture(captured))row.releasePointerCapture(captured);
     const ending=epoch;releasing=true;
@@ -934,10 +1085,10 @@ function bindVolume(row: HTMLButtonElement, fill: HTMLElement, device: Endpoint,
     // Volume state is already current. Replacing these controls now would cut
     // off a picker press or dismiss the menu opened during the release spring.
     const choosingOutput=!!document.querySelector('.sonar-output-open:active,.sonar-output-open[aria-expanded=true]') || (quick&&quickOutputGroup!==null);
-    if(!choosingOutput)render();
+    if(!choosingOutput && state)applyState(state);
     if(native)void refresh(true);
   };
-  const cancel=()=>{if(stream)void end(false);};
+  const cancel=()=>{clearTimeout(wheelTimer);wheel.reset();if(stream)void end(false);};
   const fromPointer=(x:number)=>{
     if(!bounds)return;
     // The hit track stays fixed while its paint expands. Keep the pointer map
@@ -954,6 +1105,19 @@ function bindVolume(row: HTMLButtonElement, fill: HTMLElement, device: Endpoint,
   row.addEventListener('pointerup',event=>{if(pointer===event.pointerId){fromPointer(event.clientX);void end(true);}});
   const cancelPointer=(event:PointerEvent)=>{if(pointer===event.pointerId)cancel();};
   row.addEventListener('pointercancel',cancelPointer);row.addEventListener('lostpointercapture',cancelPointer);
+  row.addEventListener('wheel',event=>{
+    // Leave page scroll and pinch-zoom alone outside an enabled volume track.
+    if(event.ctrlKey || event.metaKey || event.altKey || Math.abs(event.deltaX)>Math.abs(event.deltaY) || pointer!==null || busy || releasing || (!wheelActive && !available()))return;
+    event.preventDefault();
+    const delta=wheel.step(event.deltaY,event.deltaMode,event.shiftKey,performance.now());
+    if(!delta)return;
+    if(!wheelActive) {
+      if(Math.min(1,Math.max(0,next+delta))===next)return;
+      begin(false);wheelActive=true;cancelDrag=cancel;
+    }
+    update(next+delta);clearTimeout(wheelTimer);
+    wheelTimer=setTimeout(()=>void end(true),160);
+  },{passive:false});
   row.addEventListener('keydown',event=>{
     if(!available() || pointer!==null || !['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End'].includes(event.key))return;
     event.preventDefault();begin(false);update(event.key==='Home'?0:event.key==='End'?1:next+(['ArrowRight','ArrowUp'].includes(event.key)?1:-1)*(event.shiftKey?.01:.05));void end(true);
@@ -970,14 +1134,10 @@ const refresh=singleFlight(async (force = false) => {
     if (native && !editing()) {
       const next = await invoke<ViewState>('audio_action',{action:{kind:'read'}});
       if (requestedRevision !== revision || busy || dragging || windowDragging || shortcutRecording || editing()) return;
-      const visible = (value: ViewState | null) => value ? JSON.stringify([
-        value.settings,value.audio.endpoints.map(({id,name,flow,form_factor})=>[id,name,flow,form_factor]),value.separation_available,
-        value.sonar.connection,value.sonar.message,value.sonar.mode,value.sonar.volumes,value.sonar.routes,value.sonar.devices,value.sonar.applications,
-        value.app_routing?.map(({process_id,stable_id,requested,origin,pending,message,icon_data_url})=>[process_id,stable_id,requested,origin,pending,message,icon_data_url]),value.routing_warnings,
-      ]) : '';
-      if (visible(next) !== visible(state)) { state = next; render(); void reportNative().catch(e => { error = String(e); render(); }); }
+      applyState(next);
+      void reportNative().catch(showError);
     }
-  } catch (e) { if (requestedRevision === revision) { const message=String(e);if(state&&error!==message)showToast(message);error=message;render(); } }
+  } catch (e) { if (requestedRevision === revision) { const message=userError(e,state?.settings.language==='en');if(error!==message)showError(e);if(!state)render(); } }
 });
 function fixture(): ViewState {
   const names = ['Razer BlackShark V2 Pro','LG TV SSCR2(NVIDIA High Definition Audio)','Sony WH-1000XM6','Speaker'];
@@ -1039,7 +1199,7 @@ if (params.has('tray-menu')) {
       state.sonar.applications=icons.slice(0,3).map((image,index) => ({process_id:100+index,process_name:image.name,display_name:image.name,route:outputGroups[index],activity:'active',routing_error:false}));
       state.app_routing=icons.slice(0,3).map((image,index) => ({process_id:100+index,stable_id:image.stable_id,requested:outputGroups[index],origin:'user',pending:false,icon_data_url:image.icon_data_url}));
       render();
-    }).catch(reason => {error=String(reason);render();});
+    }).catch(reason => {showError(reason);render();});
   }
   if (native) {
     if(!quick)void listen<TrayShortcut>('jack-shortcut-key',event=>{
@@ -1071,16 +1231,16 @@ if (params.has('tray-menu')) {
       // One permanent handler for logo, text AND header gaps. Do not combine
       // Tauri's automatic drag region with a second pointerdown drag request.
       event.preventDefault();event.stopPropagation();windowDragging=true;revision++;
-      void invoke('begin_window_drag').catch(reason=>{error=String(reason);}).finally(()=>{
+      void invoke('begin_window_drag').catch(reason=>{showError(reason);}).finally(()=>{
         windowDragging=false;render();void refresh(true);
       });
     },{capture:true});
     void refresh(true);
     void listen<Settings>('jack-preferences',event=>{
-      if(state)state.settings=event.payload;
-      theme();if(!busy)render();
+      if(state){const next={...state,settings:event.payload};if(!busy && !dragging && !shortcutRecording)applyState(next);else state=next;}
+      theme();
     });
-    void listen<string>('jack-error',e => { error = e.payload; showToast(error); render(); });
+    void listen<string>('jack-error',e => { showError(e.payload); });
     void listen<boolean>('jack-visibility',e => { visible = e.payload; if (quick) document.documentElement.dataset.popupOpen=String(visible); if (!visible) cancelDrag?.(); if (visible) void refresh(); });
     void listen<QuickLayout>('jack-popup-layout',e=>{if(quick)applyQuickLayout(e.payload);});
     void listen('jack-popup-hidden',()=>{if(quick && !visible){quickOutputGroup=null;renderQuick();}});

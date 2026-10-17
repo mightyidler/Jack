@@ -168,7 +168,7 @@ select { appearance:none; min-width:44px; padding:0; border:0; background:transp
 .sonar-channel { padding:12px; box-shadow:inset 0 0 0 1px var(--group-surface); background:var(--group-surface); }
 .sonar-channel-head { min-height:24px; display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; gap:8px; }
 .sonar-channel-title { display:flex; align-items:center; gap:8px; }
-.sonar-percent { position:relative; z-index:1; flex:none; font-size:17px; line-height:24px; font-weight:400; letter-spacing:-.34px; }
+.sonar-percent,.output-unavailable { position:relative; z-index:1; flex:none; font-size:17px; line-height:24px; font-weight:400; letter-spacing:-.34px; }
 .sonar-device-control { display:flex; gap:4px; align-items:stretch; }
 .sonar-device-control>.device-row { flex:1; min-width:0; height:44px; min-height:44px; padding:9px 10px; background:var(--volume-track); box-shadow:inset 0 0 0 1px var(--volume-track); border-radius:12px 4px 4px 12px; }
 .sonar-device-picker { position:relative; width:44px; flex:none; background:var(--volume-track); box-shadow:inset 0 0 0 1px var(--volume-track); border-radius:4px 12px 12px 4px; }

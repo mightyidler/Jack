@@ -17,6 +17,7 @@ mod sonar_routing;
 mod sonar_verification;
 mod tray_menu;
 mod tray_shortcut;
+mod user_error;
 mod verification;
 use audio::{Action, Broker, ViewState};
 #[tauri::command]
@@ -25,7 +26,7 @@ async fn audio_volume(
     target: audio::LiveVolumeTarget,
     level: f64,
     expected: f64,
-) -> Result<f64, String> {
+) -> Result<f64, user_error::UserError> {
     let handle = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         handle
@@ -34,6 +35,7 @@ async fn audio_volume(
     })
     .await
     .map_err(|e| e.to_string())?
+    .map_err(Into::into)
 }
 use tauri::{
     Emitter, Manager,
@@ -83,7 +85,14 @@ fn ui_ready(
 }
 
 #[tauri::command]
-async fn audio_action(app: tauri::AppHandle, action: Action) -> Result<ViewState, String> {
+async fn audio_action(
+    app: tauri::AppHandle,
+    action: Action,
+) -> Result<ViewState, user_error::UserError> {
+    audio_action_inner(app, action).await.map_err(Into::into)
+}
+
+async fn audio_action_inner(app: tauri::AppHandle, action: Action) -> Result<ViewState, String> {
     // WebViews may invoke IPC while setup is still registering managed state.
     // TrayLabels is registered after the broker and shortcut state are ready.
     if app.try_state::<TrayLabels>().is_none() {
@@ -125,7 +134,9 @@ async fn audio_action(app: tauri::AppHandle, action: Action) -> Result<ViewState
     };
     let previous_shortcut = tray_shortcut::current(&app);
     if let Some(config) = next_shortcut.as_ref() {
-        tray_shortcut::configure(&app, config.clone()).await?;
+        tray_shortcut::configure(&app, config.clone())
+            .await
+            .map_err(|error| format!("Shortcut registration failed: {error}"))?;
     }
     let handle = app.clone();
     let outcome =
@@ -151,7 +162,7 @@ async fn audio_action(app: tauri::AppHandle, action: Action) -> Result<ViewState
     Ok(state)
 }
 #[tauri::command]
-async fn quit(app: tauri::AppHandle) -> Result<(), String> {
+async fn quit(app: tauri::AppHandle) -> Result<(), user_error::UserError> {
     let handle = app.clone();
     tauri::async_runtime::spawn_blocking(move || handle.state::<Broker>().call(Action::Shutdown))
         .await

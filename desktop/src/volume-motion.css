@@ -31,6 +31,9 @@
 .quick-panel .sonar-device-control .sonar-percent { position:relative; right:auto; font-size:15px; line-height:20px; font-weight:400; letter-spacing:-.3px; }
 [data-tray-volume-numbers=always] .quick-panel .sonar-device-control .sonar-percent { opacity:1; filter:blur(0); transform:translateY(0); }
 .quick-panel .sonar-device-control .volume-content .device-name { margin-right:0; }
+.output-unavailable { margin-left:auto; color:var(--secondary); font-weight:300; white-space:nowrap; }
+.quick-panel .output-unavailable { font-weight:300; }
+.device-row[data-volume-unavailable] .device-name { min-width:0; }
 @media(prefers-reduced-motion:reduce) {
   .input-volume-status { --volume-status-duration:0ms; }
   .device-row[role=slider] .volume-fill,.sonar-percent,.volume-content .device-name,.input-volume-status>.check { transition:none!important; }

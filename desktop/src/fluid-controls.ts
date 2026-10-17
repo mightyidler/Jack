@@ -170,7 +170,7 @@ class FluidControls {
 
 export function bindFluidControls(host:HTMLElement) {
   const button=host.querySelector<HTMLButtonElement>('.sonar-output-open');
-  const row=host.matches('.device-row')?host:host.querySelector<HTMLElement>('.device-row[role=slider]');
+  const row=host.matches('.device-row')?host:host.querySelector<HTMLElement>('.device-row[role=slider],.device-row[data-volume-unavailable]');
   if(!row)return;
   row.classList.add('fluid-volume-control');
   pairs.set(row,new FluidControls(host,row,button));

@@ -130,6 +130,43 @@ pub fn select(
 ) -> Result<Settings, String> {
     select_with_commit(service, settings, channel, device, expected, commit)
 }
+
+/// Enabling the link immediately adopts Gaming's device. Persist the switch
+/// together with routing and per-group gain so a failed change stays OFF.
+pub fn set_linked(
+    service: &mut Service,
+    settings: &Settings,
+    enabled: bool,
+    commit: impl FnOnce(&Settings) -> Result<(), String>,
+) -> Result<Settings, String> {
+    set_linked_with_commit(service, settings, enabled, commit)
+}
+
+fn set_linked_with_commit(
+    service: &mut impl OutputService,
+    settings: &Settings,
+    enabled: bool,
+    commit: impl FnOnce(&Settings) -> Result<(), String>,
+) -> Result<Settings, String> {
+    let mut next = settings.clone();
+    next.link_group_outputs = enabled;
+    if !enabled || settings.link_group_outputs {
+        commit(&next)?;
+        return Ok(next);
+    }
+    let before = service.read();
+    if !before.available() {
+        return Err("Sonar is not ready".into());
+    }
+    let device = &before
+        .routes
+        .iter()
+        .find(|route| route.channel == Channel::Game)
+        .ok_or("Gaming output is not ready")?
+        .device_id;
+    select_with_commit(service, &next, Channel::Game, device, device, commit)
+}
+
 #[cfg(test)]
 fn select_with(
     service: &mut impl OutputService,
@@ -348,6 +385,142 @@ fn select_with_commit(
 mod tests {
     use super::*;
     #[test]
+    #[ignore = "Live Sonar sync enable/volume restore; requires Jack to be closed"]
+    fn live_enable_sync_restores_group_levels_and_recovers_original_audio() {
+        let proof = std::path::PathBuf::from(
+            std::env::var("JACK_OUTPUT_SYNC_PROOF").expect("explicit proof path required"),
+        );
+        let root = jack_windows_audio::control::current_user_root().unwrap();
+        let _lease =
+            jack_windows_audio::control::ControlLease::acquire(&root.join("control.lock")).unwrap();
+        let mut service = Service::new().unwrap();
+        let before = service.read();
+        assert!(before.available());
+        let game = before
+            .routes
+            .iter()
+            .find(|r| r.channel == Channel::Game)
+            .unwrap();
+        let other = before
+            .devices
+            .iter()
+            .find(|d| d.enabled && d.role == DeviceRole::Playback && d.id != game.device_id)
+            .expect("connected alternative output required");
+        let mut settings = Settings {
+            link_group_outputs: false,
+            ..Settings::default()
+        };
+        settings.groups.retain(|g| {
+            before
+                .sources
+                .iter()
+                .any(|s| g.output_channel().map(crate::sonar_routing::channel) == Some(s.channel))
+        });
+        if before.sources.iter().any(|s| s.channel == Channel::Aux) {
+            settings
+                .add_sonar_group("Aux".into(), jack_core::OutputChannel::Aux)
+                .unwrap();
+        }
+        let operation = (|| -> Result<(), String> {
+            // Exercise the OFF -> ON transition with genuinely different devices.
+            for group in settings
+                .groups
+                .iter()
+                .filter(|g| g.output_channel() != Some(jack_core::OutputChannel::Game))
+            {
+                let channel = crate::sonar_routing::channel(group.output_channel().unwrap());
+                let current = service.read();
+                let route = current
+                    .routes
+                    .iter()
+                    .find(|r| r.channel == channel)
+                    .ok_or("route missing")?;
+                if route.device_id != other.id {
+                    service.route(channel, &other.id, &route.device_id)?;
+                }
+            }
+            let split = service.read();
+            if !split
+                .routes
+                .iter()
+                .any(|r| r.channel == Channel::Game && r.device_id == game.device_id)
+            {
+                return Err("GG coupled Gaming while preparing independent outputs".into());
+            }
+            for (group, level) in settings.groups.iter_mut().zip([0.1, 0.0, 0.27, 0.41]) {
+                group.device_volumes.insert(game.device_id.clone(), level);
+            }
+            let selected = set_linked(&mut service, &settings, true, |_| Ok(()))?;
+            let after = service.read();
+            if !selected.link_group_outputs
+                || !selected
+                    .groups
+                    .iter()
+                    .zip([0.1, 0.0, 0.27, 0.41])
+                    .all(|(g, saved)| {
+                        let channel = crate::sonar_routing::channel(g.output_channel().unwrap());
+                        let level = if channel == Channel::Game {
+                            split
+                                .volumes
+                                .iter()
+                                .find(|v| v.channel == MixerChannel::Game)
+                                .unwrap()
+                                .volume
+                        } else {
+                            saved
+                        };
+                        after
+                            .routes
+                            .iter()
+                            .any(|r| r.channel == channel && r.device_id == game.device_id)
+                            && after.volumes.iter().any(|v| {
+                                v.channel == channel.into() && (v.volume - level).abs() < 0.0001
+                            })
+                    })
+            {
+                return Err("sync enable readback failed".into());
+            }
+            Ok(())
+        })();
+        // Restore routes first, then gains against their latest confirmed values.
+        let mut recovery = Vec::new();
+        for route in &before.routes {
+            let current = service.read();
+            if let Some(now) = current.routes.iter().find(|r| r.channel == route.channel)
+                && now.device_id != route.device_id
+                && let Err(error) = service.route(route.channel, &route.device_id, &now.device_id)
+            {
+                recovery.push(error);
+            }
+        }
+        for volume in &before.volumes {
+            let current = service.read();
+            if let Some(now) = current.volumes.iter().find(|v| v.channel == volume.channel)
+                && (now.volume - volume.volume).abs() > 0.0001
+                && let Err(error) = service.execute(Command::Volume {
+                    channel: volume.channel,
+                    level: volume.volume,
+                    expected: now.volume,
+                })
+            {
+                recovery.push(error.to_string());
+            }
+        }
+        let restored = service.read();
+        let routes_restored = before.routes.iter().all(|r| {
+            restored
+                .routes
+                .iter()
+                .any(|v| v.channel == r.channel && v.device_id == r.device_id)
+        });
+        let volumes_restored = before.volumes == restored.volumes;
+        let passed =
+            operation.is_ok() && routes_restored && volumes_restored && recovery.is_empty();
+        let report = serde_json::json!({"passed":passed,"operation_error":operation.err(),"routes_restored":routes_restored,"volumes_restored":volumes_restored,"recovery_errors":recovery});
+        std::fs::write(proof, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
+        assert!(passed, "{report}");
+    }
+    #[test]
     #[ignore = "Live Sonar group output switch/readback/restore; requires Jack to be closed"]
     fn live_group_outputs_change_together_and_restore() {
         let proof = std::path::PathBuf::from(
@@ -556,6 +729,124 @@ mod tests {
             coupled: false,
             calls: vec![],
             fail_volume: None,
+        }
+    }
+    fn unlinked_fixture() -> (Fake, Settings) {
+        let mut f = fixture();
+        let mut settings = Settings {
+            link_group_outputs: false,
+            ..Settings::default()
+        };
+        settings
+            .add_sonar_group("Aux".into(), jack_core::OutputChannel::Aux)
+            .unwrap();
+        f.state.sources.push(Source {
+            channel: Channel::Aux,
+            endpoint_id: "aux".into(),
+        });
+        f.state.routes.push(Route {
+            channel: Channel::Aux,
+            device_id: "old".into(),
+            device_name: None,
+        });
+        f.state
+            .volumes
+            .push(jack_sonar::sonar::models::VolumeState {
+                channel: MixerChannel::Aux,
+                volume: 0.63,
+                muted: true,
+            });
+        f.state.routes[0].device_id = "new".into();
+        for (group, level) in settings.groups.iter_mut().zip([0.1, 0.0, 0.21, 0.87]) {
+            group.device_volumes.insert("new".into(), level);
+        }
+        (f, settings)
+    }
+    #[test]
+    fn enabling_sync_adopts_gaming_and_restores_each_device_group_level() {
+        let (mut f, settings) = unlinked_fixture();
+        let next = set_linked_with_commit(&mut f, &settings, true, |next| {
+            assert!(next.link_group_outputs);
+            assert_eq!(next.groups[1].device_volumes["new"], 0.0);
+            Ok(())
+        })
+        .unwrap();
+        assert!(next.link_group_outputs);
+        assert_eq!(f.calls, vec![Channel::Chat, Channel::Media, Channel::Aux]);
+        for (group, expected) in next.groups.iter().zip([0.63, 0.0, 0.21, 0.87]) {
+            let channel = crate::sonar_routing::channel(group.output_channel().unwrap());
+            assert!(
+                f.state
+                    .routes
+                    .iter()
+                    .any(|r| r.channel == channel && r.device_id == "new")
+            );
+            assert!(
+                f.state
+                    .volumes
+                    .iter()
+                    .any(|v| v.channel == channel.into() && v.volume == expected)
+            );
+            assert_eq!(group.device_volumes["new"], expected);
+            if channel != Channel::Game {
+                assert_eq!(group.device_volumes["old"], 0.63);
+            }
+        }
+        assert_eq!(f.state.routes[3].device_id, "old");
+        assert_eq!(f.state.volumes[3].volume, 0.63);
+        assert!(f.state.volumes[4].muted);
+        assert!(!settings.link_group_outputs);
+    }
+    #[test]
+    fn enabling_sync_keeps_current_levels_for_same_or_unremembered_devices() {
+        let (mut f, mut settings) = unlinked_fixture();
+        f.state.routes[1].device_id = "new".into();
+        settings.groups[2].device_volumes.clear();
+        set_linked_with_commit(&mut f, &settings, true, |_| Ok(())).unwrap();
+        assert_eq!(f.calls, vec![Channel::Media, Channel::Aux]);
+        assert_eq!(f.state.volumes[0].volume, 0.63);
+        assert_eq!(f.state.volumes[1].volume, 0.63);
+        assert_eq!(f.state.volumes[2].volume, 0.63);
+    }
+    #[test]
+    fn failed_sync_enable_recovers_audio_and_does_not_commit_on() {
+        for failure in ["route", "volume", "commit", "disconnected", "missing"] {
+            let (mut f, settings) = unlinked_fixture();
+            match failure {
+                "route" => f.fail = Some(Channel::Media),
+                "volume" => f.fail_volume = Some(Channel::Media),
+                "disconnected" => f.state.connection = "disconnected".into(),
+                "missing" => f.state.routes.retain(|r| r.channel != Channel::Game),
+                _ => {}
+            }
+            let before = f.state.clone();
+            let mut commits = 0;
+            assert!(
+                set_linked_with_commit(&mut f, &settings, true, |_| {
+                    commits += 1;
+                    Err("disk full".into())
+                })
+                .is_err(),
+                "{failure}"
+            );
+            assert_eq!(commits, usize::from(failure == "commit"), "{failure}");
+            assert_eq!(f.state.routes, before.routes, "{failure}");
+            assert_eq!(f.state.volumes, before.volumes, "{failure}");
+            assert!(!settings.link_group_outputs);
+        }
+    }
+    #[test]
+    fn disabling_or_repeating_sync_does_not_route_even_when_disconnected() {
+        for (previous, enabled) in [(true, false), (false, false), (true, true)] {
+            let (mut f, mut settings) = unlinked_fixture();
+            settings.link_group_outputs = previous;
+            f.state.connection = "disconnected".into();
+            let before = f.state.clone();
+            let next = set_linked_with_commit(&mut f, &settings, enabled, |_| Ok(())).unwrap();
+            assert_eq!(next.link_group_outputs, enabled);
+            assert!(f.calls.is_empty());
+            assert_eq!(f.state.routes, before.routes);
+            assert_eq!(f.state.volumes, before.volumes);
         }
     }
     #[test]

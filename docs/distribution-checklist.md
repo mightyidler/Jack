@@ -29,6 +29,8 @@
 
 2026-10-16: [0.1.10 릴리즈](https://github.com/mightyidler/Jack/releases/tag/v0.1.10)를 정식 공개하고 Latest로 지정했다. [배포 작업](https://github.com/mightyidler/Jack/actions/runs/38881970149)의 전체 검사·서명된 설치 파일 생성·초안 검증·공개 다운로드 검증이 통과했다. 이 PC에서도 `node tools/verify-release.mjs --published artifacts/distribution/v0.1.10`으로 공개 업데이트 주소, 익명 다운로드, 기존 공개 키 호환성, Rust 업데이터 manifest 파싱, 설치 파일 서명과 변조 거부를 재확인했다. 설치 파일 SHA256은 `9aa88dec4081c0d134d687dee14a869b80f04bedd75f7458fe7e3dbebfe00fdc`이다. 실제 기존 앱에서 0.1.10 업데이트 설치·재시작·오디오 동작은 미확인이다.
 
+2026-10-17: [0.1.11 릴리즈](https://github.com/mightyidler/Jack/releases/tag/v0.1.11)를 정식 공개하고 Latest로 지정했다. [배포 작업](https://github.com/mightyidler/Jack/actions/runs/38993700170)의 전체 검사·서명 설치 파일 생성·초안 검증·공개 다운로드 검증과 현재 PC의 공개 파일 재다운로드 검증이 통과했다. 설치 파일 SHA256은 `bf5989b12272cb8bb59e3fbaf1351220f49a24f2fe03a3abd7dd08e261d7295f`이다. 이번 요청의 공개 전 검증에서는 실행 중인 웹 미리보기의 메인·트레이·마이크와 네이티브 개발 앱의 실제 볼륨 IPC·외부 변경 반영·휠 5%/Shift+휠 1%·충돌 거부, 실제 Sonar의 출력 동기화·그룹별 볼륨 복원을 검사했다. 모두 통과했으며 원래 장치·볼륨 복구를 확인했다. 기존 설치 앱의 0.1.11 업데이트 설치·재시작 후 동작과 별도 PC 환경은 미확인이다.
+
 현재 사용 가능한 PC는 기존 GG가 설치된 한 대다. GG를 제거하거나 별도 Windows 환경을 구성하지 않는다.
 
 ## 실제 확인 절차

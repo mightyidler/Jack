@@ -11,6 +11,10 @@ on:
         description: Verify and publish an existing signed draft with unchanged app sources
         type: boolean
         default: false
+      run_tests:
+        description: Run automated tests before packaging (disable only for a source-reviewed release)
+        type: boolean
+        default: true
 permissions:
   contents: write
 concurrency:
@@ -49,12 +53,16 @@ jobs:
       - run: node tools/verify-release.mjs
       - run: node tools/verify-release.mjs --preflight
       - run: node --test tools/verify-release.test.mjs
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_tests }}
       - run: cargo fmt --all -- --check
       - run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - run: cargo test --locked --workspace
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_tests }}
       - run: npm test
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_tests }}
         working-directory: desktop
       - run: pwsh -NoProfile -File tools/verify-gg-setup.ps1
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_tests }}
       - run: node tools/collect-licenses.mjs --check
       - name: Read release notes
         id: notes

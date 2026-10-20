@@ -253,7 +253,7 @@ function sectionLabel(label: string) { return element('h2','section-label',label
 function theme() {
   const selected = state?.settings.theme ?? 'system';
   const light = selected === 'light' || (selected === 'system' && matchMedia('(prefers-color-scheme: light)').matches);
-  document.documentElement.dataset.theme = params.get('fixture') === 'design' && !params.has('theme') && import.meta.env.DEV ? 'dark' : light ? 'light' : 'dark';
+  document.documentElement.dataset.theme = light ? 'light' : 'dark';
   document.documentElement.lang = state?.settings.language ?? 'ko';
   document.documentElement.dataset.fastlaneTheme = document.documentElement.dataset.theme;
   document.documentElement.dataset.trayVolumeNumbers=state?.settings.tray_volume_numbers_always_visible?'always':'adjusting';
@@ -376,7 +376,10 @@ function render() {
       const newToggle=content.querySelector<HTMLButtonElement>(`#${oldToggle.id}`);
       if(!newToggle)continue;
       const kept=directChild(oldToggle,oldPanel),replacement=directChild(newToggle,content);
-      preserved.set(replacement,kept);
+      // Environment also contains dropdowns whose labels, selected values and
+      // callbacks belong to this render. Preserve only its animated switch row.
+      const environment=oldToggle.closest('.environment');
+      if(!environment)preserved.set(replacement,kept);
       const oldLabel=kept.querySelector('.section-label'),newLabel=replacement.querySelector('.section-label');
       if(oldLabel&&newLabel)oldLabel.textContent=newLabel.textContent;
       const oldDescription=oldToggle.closest('.startup,.separation')?.querySelector('.description');
@@ -385,6 +388,7 @@ function render() {
       oldToggle.disabled=newToggle.disabled;
       oldToggle.setAttribute('aria-label',newToggle.getAttribute('aria-label')!);
       oldToggle.setAttribute('aria-checked',newToggle.getAttribute('aria-checked')!);
+      if(environment)newToggle.closest('.startup')!.replaceWith(oldToggle.closest('.startup')!);
       const oldCard=oldToggle.closest<HTMLElement>('.shortcut-settings');
       const newCard=newToggle.closest<HTMLElement>('.shortcut-settings');
       if(!oldCard||!newCard)continue;
@@ -1167,6 +1171,7 @@ function fixture(): ViewState {
     if (params.has('missing-volume')) preview.sonar.volumes = preview.sonar.volumes.filter(volume => volume.channel !== 'aux');
   }
   if (params.has('grouped-apps')) preview.app_routing = preview.sonar.applications.map(session => ({process_id:session.process_id,stable_id:`path:preview/${session.process_name}`,requested:session.route as Channel,origin:'automatic',pending:false}));
+  if (params.get('fixture') === 'design' && !params.has('theme')) preview.settings.theme = 'dark';
   if (params.get('theme') === 'light' || params.get('theme') === 'dark') preview.settings.theme = params.get('theme') as Theme;
   if (params.get('lang') === 'en') preview.settings.language = 'en';
   preview.settings.tray_volume_numbers_always_visible=params.has('volume-numbers');
@@ -1237,6 +1242,8 @@ if (params.has('tray-menu')) {
     },{capture:true});
     void refresh(true);
     void listen<Settings>('jack-preferences',event=>{
+      // A read started before this notification must not restore older settings.
+      revision++;
       if(state){const next={...state,settings:event.payload};if(!busy && !dragging && !shortcutRecording)applyState(next);else state=next;}
       theme();
     });

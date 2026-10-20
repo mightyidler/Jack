@@ -33,7 +33,12 @@ export function preferenceDropdown(id: string, label: string, options: Preferenc
       const text=document.createElement('span'); text.textContent=option.label; if(option.lang) text.lang=option.lang;
       const check=document.createElement('span'); check.className='preference-check'; check.setAttribute('aria-hidden','true');
       item.append(text,check); viewport.append(item);
-      item.addEventListener('click',() => { menu.hidePopover(); trigger.focus(); if (option.value!==selected) change(option.value); });
+      item.addEventListener('click',() => {
+        menu.hidePopover();
+        if(trigger.disabled || !trigger.isConnected)return;
+        trigger.focus();
+        if(option.value!==selected)change(option.value);
+      });
     }
     menu.append(viewport); document.querySelector('#app')!.append(menu); current=menu;
     const disposeScrollbar=mountScrollbar(viewport,menu,'menu');

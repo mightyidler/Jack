@@ -30,6 +30,7 @@ desktop/src-tauri/gen/
 /tools/*
 !/tools/jack-audio-probe/
 !/tools/verify-gg-setup.ps1
+!/tools/verify-persistent-spotify.ps1
 !/tools/verify-release.mjs
 !/tools/verify-release.test.mjs
 !/tools/collect-licenses.mjs

@@ -286,7 +286,8 @@ impl Owner {
                 let _ = routes.policy.bind_process(session.pid);
             }
         }
-        let report = routes.restore_best_effort().map_err(|e| e.to_string())?;
+        let report =
+            crate::sonar_routing::recover_unfinished(&mut routes).map_err(|e| e.to_string())?;
         let mut app_routing = crate::sonar_routing::AppRouting::default();
         app_routing.remember_recovery(&report);
         let settings_path = root.join("settings.json");
@@ -355,6 +356,13 @@ impl Owner {
             &audio,
             &sonar,
         );
+        let mut next = self.settings.clone();
+        next.sonar_auto_exclusions
+            .extend(self.app_routing.external_choices.iter().cloned());
+        if next != self.settings {
+            self.preferences(next)?;
+        }
+        self.app_routing.acknowledge_external(&mut self.routes)?;
         // Routing may recreate audio sessions; publish current effective routes.
         if self.app_routing.apps.iter().any(|app| app.pending) {
             sonar = self.sonar.refresh(false);
@@ -457,10 +465,6 @@ impl Owner {
                 self.apply_preferences(initial_startup_preferences(&self.settings), true)?;
             }
             Action::UpdatePause { paused } => {
-                if paused && !self.update_paused {
-                    let sonar = self.sonar.refresh(false);
-                    self.app_routing.restore_live(&mut self.routes, &sonar)?;
-                }
                 self.update_paused = paused;
             }
             Action::Read => {}
@@ -788,7 +792,8 @@ impl Owner {
             }
             Action::Shutdown => {
                 let sonar = self.sonar.refresh(false);
-                self.app_routing.restore_live(&mut self.routes, &sonar)?;
+                // Successful app routes belong to the user's persistent setup.
+                // Quit/update must not send them back to the old default device.
                 return Ok(self.passive_view(sonar));
             }
         }
@@ -1076,6 +1081,147 @@ fn write_startup(value: Option<&str>) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[ignore = "Live Spotify route lifecycle; requires JACK_PERSISTENT_SPOTIFY_PID and Jack closed"]
+    fn native_spotify_assignment_survives_shutdown_restart_and_external_edits() {
+        use jack_core::routing::AudioPolicy;
+        use jack_sonar::sonar::models::Channel;
+        let pid: u32 = std::env::var("JACK_PERSISTENT_SPOTIFY_PID")
+            .unwrap()
+            .parse()
+            .unwrap();
+        let proof = PathBuf::from(std::env::var("JACK_PERSISTENT_SPOTIFY_PROOF").unwrap());
+        let mut owner = Owner::new().unwrap();
+        let identity = owner.app_routing.identity(pid).unwrap();
+        assert_eq!(identity.executable_name.as_deref(), Some("Spotify.exe"));
+        let before_settings = owner.settings.clone();
+        std::fs::write(
+            proof.with_extension("settings-before.json"),
+            serde_json::to_vec_pretty(&before_settings).unwrap(),
+        )
+        .unwrap();
+        let view = owner.view().unwrap();
+        let name = view
+            .sonar
+            .applications
+            .iter()
+            .find(|app| app.process_id == pid)
+            .unwrap()
+            .process_name
+            .clone();
+        let binding = owner.routes.policy.bind_process(pid).unwrap();
+        let keys = crate::sonar_routing::app_keys(&binding);
+        let media = view
+            .sonar
+            .sources
+            .iter()
+            .find(|source| source.channel == Channel::Media)
+            .unwrap()
+            .endpoint_id
+            .clone();
+        let game = view
+            .sonar
+            .sources
+            .iter()
+            .find(|source| source.channel == Channel::Game)
+            .unwrap()
+            .endpoint_id
+            .clone();
+        owner
+            .handle(Action::AssignApplication {
+                process_id: pid,
+                process_name: name.clone(),
+                channel: Some(Channel::Media),
+                automatic: false,
+            })
+            .unwrap();
+        let read = |owner: &mut Owner| {
+            keys[..2]
+                .iter()
+                .map(|key| owner.routes.policy.read(key).unwrap())
+                .collect::<Vec<_>>()
+        };
+        let expected = vec![Some(media.clone()); 2];
+        assert_eq!(read(&mut owner), expected);
+        owner.handle(Action::UpdatePause { paused: true }).unwrap();
+        assert_eq!(read(&mut owner), expected);
+        owner.handle(Action::Shutdown).unwrap();
+        assert_eq!(read(&mut owner), expected);
+        drop(owner);
+
+        let mut owner = Owner::new().unwrap();
+        owner.view().unwrap();
+        assert_eq!(read(&mut owner), expected);
+        // Simulate the same persisted per-app output change made in Windows.
+        for key in &keys[..2] {
+            let current = owner.routes.policy.read(key).unwrap();
+            owner
+                .routes
+                .policy
+                .compare_and_set(key, current.as_deref(), Some(&game))
+                .unwrap();
+        }
+        owner.view().unwrap();
+        assert!(
+            owner
+                .settings
+                .sonar_auto_exclusions
+                .contains(&identity.stable_id)
+        );
+        assert_eq!(read(&mut owner), vec![Some(game.clone()); 2]);
+        owner.handle(Action::Shutdown).unwrap();
+        drop(owner);
+
+        let mut owner = Owner::new().unwrap();
+        // Windows migrates streams asynchronously; wait for GG's inventory to
+        // observe the external change before issuing a new explicit assignment.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            owner.sonar.refresh(true);
+            let current = owner.view().unwrap();
+            if current
+                .sonar
+                .applications
+                .iter()
+                .any(|app| app.process_id == pid && app.route.channel() == Some(Channel::Game))
+            {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "Sonar did not observe the Windows route change"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        assert_eq!(read(&mut owner), vec![Some(game.clone()); 2]);
+        // Explicitly assigning again resumes control and clears the saved exclusion.
+        owner
+            .handle(Action::AssignApplication {
+                process_id: pid,
+                process_name: name,
+                channel: Some(Channel::Media),
+                automatic: false,
+            })
+            .unwrap();
+        assert!(
+            !owner
+                .settings
+                .sonar_auto_exclusions
+                .contains(&identity.stable_id)
+        );
+        assert_eq!(read(&mut owner), expected);
+        owner.preferences(before_settings.clone()).unwrap();
+        owner.handle(Action::Shutdown).unwrap();
+        assert_eq!(read(&mut owner), expected);
+        let report = serde_json::json!({
+            "passed":true,"pid":pid,"settings_path":owner.settings_path,"media_endpoint":media,
+            "steps":["native Sonar assignment persisted","update pause retained route","shutdown retained route","new Owner retained route",
+                "external Windows choice retained and exclusion saved","second new Owner retained external choice","explicit reassignment resumed control"],
+            "final_policy":read(&mut owner),"original_jack_preferences_restored":owner.settings == before_settings,
+            "scope":"Actual production Owner lifecycle against live Spotify and Windows/Sonar; Spotify process restart tested separately"
+        });
+        std::fs::write(proof, serde_json::to_vec_pretty(&report).unwrap()).unwrap();
+    }
     #[test]
     fn startup_default_on_migrates_legacy_preferences_once_and_preserves_explicit_off() {
         let legacy = Settings {

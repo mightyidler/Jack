@@ -1,4 +1,4 @@
-//! Persistent app intent plus ownership of Sonar's Windows per-app route writes.
+//! Persistent app assignments plus explicit undo of Sonar's Windows route writes.
 //! The engine/channel state stays in Sonar; only app rules are Jack preferences.
 use jack_core::{AppIdentity, Classification, OutputChannel, Settings, classify, routing::*};
 use jack_sonar::{Command, Service, State, sonar::models::Channel};
@@ -278,7 +278,8 @@ mod group_recovery_tests {
                 ..Default::default()
             }),
         };
-        let mut pending = BTreeSet::from([exited.key.clone()]);
+        request_restore(&mut routes, &BTreeSet::from([exited.key.clone()])).unwrap();
+        let mut pending = BTreeSet::new();
         recover_pending_routes(&mut routes, &mut pending).unwrap();
         assert!(pending.contains(&exited.key));
         assert_eq!(routes.store.0.changes.len(), 2);
@@ -308,7 +309,8 @@ mod group_recovery_tests {
                 ..Default::default()
             }),
         };
-        let mut pending = BTreeSet::from([owned.key.clone()]);
+        request_restore(&mut routes, &BTreeSet::from([owned.key.clone()])).unwrap();
+        let mut pending = BTreeSet::new();
         recover_pending_routes(&mut routes, &mut pending).unwrap();
         assert!(pending.contains(&owned.key));
         routes.policy.reject = false;
@@ -323,6 +325,141 @@ mod group_recovery_tests {
             routes.policy.values[&owned.key].as_deref(),
             Some("external")
         );
+    }
+
+    #[test]
+    fn applied_route_survives_app_exit_rebind_and_controller_restart_without_writes() {
+        let assigned = change("spotify", "media");
+        let mut routes = RouteController {
+            policy: Policy::default(), // App is closed: its policy cannot be read.
+            store: Store(Journal {
+                changes: vec![assigned.clone()],
+                ..Default::default()
+            }),
+        };
+        let mut stale_pending = BTreeSet::from([assigned.key.clone()]);
+        recover_pending_routes(&mut routes, &mut stale_pending).unwrap();
+        assert!(stale_pending.is_empty());
+        assert!(recover_unfinished(&mut routes).unwrap().complete);
+        assert_eq!(routes.store.0.changes[0].phase, Phase::Applied);
+
+        // Reopen the persisted journal in a new controller, with the new PID bound.
+        let saved = serde_json::to_vec(&routes.store.0).unwrap();
+        let mut restarted = RouteController {
+            policy: Policy {
+                values: BTreeMap::from([(assigned.key.clone(), Some("media".into()))]),
+                ..Default::default()
+            },
+            store: Store(serde_json::from_slice(&saved).unwrap()),
+        };
+        assert!(recover_unfinished(&mut restarted).unwrap().complete);
+        recover_pending_routes(&mut restarted, &mut BTreeSet::new()).unwrap();
+        assert_eq!(
+            restarted.policy.values[&assigned.key].as_deref(),
+            Some("media")
+        );
+        assert!(restarted.policy.writes.is_empty());
+        assert_eq!(restarted.store.0.changes.len(), 1);
+    }
+
+    #[test]
+    fn explicit_group_removal_while_app_closed_survives_restart_and_undoes_only_that_group() {
+        let removed = change("closed-aux-app", "aux");
+        let retained = change("spotify", "media");
+        let mut routes = RouteController {
+            policy: Policy::default(),
+            store: Store(Journal {
+                changes: vec![removed.clone(), retained.clone()],
+                ..Default::default()
+            }),
+        };
+        restore_source_routes(&mut routes, &BTreeSet::from(["aux".into()])).unwrap();
+        assert_eq!(routes.store.0.changes[0].phase, Phase::Restoring);
+        assert_eq!(routes.store.0.changes[1].phase, Phase::Applied);
+        let saved = serde_json::to_vec(&routes.store.0).unwrap();
+        routes.store = Store(serde_json::from_slice(&saved).unwrap());
+        routes
+            .policy
+            .values
+            .insert(removed.key.clone(), Some("aux".into()));
+        routes
+            .policy
+            .values
+            .insert(retained.key.clone(), Some("media".into()));
+        assert!(recover_unfinished(&mut routes).unwrap().complete);
+        assert_eq!(routes.policy.values[&removed.key], None);
+        assert_eq!(
+            routes.policy.values[&retained.key].as_deref(),
+            Some("media")
+        );
+        assert_eq!(routes.policy.writes, vec![removed.key]);
+    }
+
+    #[test]
+    fn external_choice_releases_all_roles_without_restoring_any_of_them() {
+        let keys = app_keys("spotify");
+        let mut routes = RouteController {
+            policy: Policy {
+                values: BTreeMap::from([
+                    (keys[0].clone(), Some("chat".into())),
+                    (keys[1].clone(), Some("media".into())),
+                ]),
+                ..Default::default()
+            },
+            store: Store(Journal {
+                changes: keys[..2]
+                    .iter()
+                    .cloned()
+                    .map(|key| Change {
+                        key,
+                        previous: None,
+                        expected: None,
+                        applied: "media".into(),
+                        phase: Phase::Applied,
+                    })
+                    .collect(),
+                ..Default::default()
+            }),
+        };
+        release_assignments(&mut routes, &keys.into_iter().collect()).unwrap();
+        assert!(routes.store.0.changes.is_empty());
+        assert!(routes.policy.writes.is_empty());
+        assert!(recover_unfinished(&mut routes).unwrap().complete);
+        assert_eq!(
+            routes.policy.values[&app_keys("spotify")[0]].as_deref(),
+            Some("chat")
+        );
+        assert_eq!(
+            routes.policy.values[&app_keys("spotify")[1]].as_deref(),
+            Some("media")
+        );
+    }
+
+    #[test]
+    fn startup_recovers_uncertain_write_but_keeps_successful_assignments() {
+        let mut failed = change("failed", "aux");
+        failed.phase = Phase::Prepared;
+        let assigned = change("spotify", "media");
+        let mut routes = RouteController {
+            policy: Policy {
+                values: BTreeMap::from([
+                    (failed.key.clone(), Some("aux".into())),
+                    (assigned.key.clone(), Some("media".into())),
+                ]),
+                ..Default::default()
+            },
+            store: Store(Journal {
+                changes: vec![failed.clone(), assigned.clone()],
+                ..Default::default()
+            }),
+        };
+        assert!(recover_unfinished(&mut routes).unwrap().complete);
+        assert_eq!(routes.policy.values[&failed.key], None);
+        assert_eq!(
+            routes.policy.values[&assigned.key].as_deref(),
+            Some("media")
+        );
+        assert_eq!(routes.policy.writes, vec![failed.key]);
     }
 
     #[test]
@@ -374,6 +511,8 @@ pub struct AppRouting {
     retry_after: BTreeMap<String, Instant>,
     pub apps: Vec<AppView>,
     pub warnings: Vec<String>,
+    // Persist these in settings so a manual Sonar/Windows choice survives Jack restart.
+    pub external_choices: BTreeSet<String>,
     // Retained only for ownership recovery while GG is unavailable, never for writes.
     source_ids: BTreeMap<Channel, BTreeSet<String>>,
     recovery_keys: BTreeSet<RouteKey>,
@@ -410,6 +549,42 @@ pub fn app_keys(identity: &str) -> [RouteKey; 3] {
         role,
     })
 }
+
+/// Applied entries are durable assignments, not unfinished transactions. A missing
+/// process only prevents readback; it must never turn an assignment into an undo.
+pub fn recover_unfinished<P: AudioPolicy, S: JournalStore>(
+    routes: &mut RouteController<P, S>,
+) -> Result<RecoveryReport, RoutingError> {
+    let keys = routes
+        .store
+        .load()?
+        .changes
+        .into_iter()
+        .filter(|change| change.phase != Phase::Applied)
+        .map(|change| change.key)
+        .collect();
+    routes.restore_keys_best_effort(&keys)
+}
+
+/// Record explicit undo before attempting it, including apps that are closed.
+/// Prepared entries retain their phase so uncertain partial writes recover safely.
+fn request_restore<P: AudioPolicy, S: JournalStore>(
+    routes: &mut RouteController<P, S>,
+    keys: &BTreeSet<RouteKey>,
+) -> Result<(), RoutingError> {
+    let mut journal = routes.store.load()?;
+    let mut changed = false;
+    for change in &mut journal.changes {
+        if keys.contains(&change.key) && change.phase == Phase::Applied {
+            change.phase = Phase::Restoring;
+            changed = true;
+        }
+    }
+    if changed {
+        routes.store.save(&journal)?;
+    }
+    Ok(())
+}
 #[cfg(test)]
 fn restore_source_routes<P: AudioPolicy, S: JournalStore>(
     routes: &mut RouteController<P, S>,
@@ -423,14 +598,16 @@ fn restore_group_routes<P: AudioPolicy, S: JournalStore>(
     app_keys: &BTreeSet<RouteKey>,
 ) -> Result<(), String> {
     let journal = routes.store.load().map_err(|e| e.to_string())?;
-    let keys = journal
+    let selected = journal
         .changes
         .iter()
-        .filter(|change| {
-            (sources.contains(&change.applied) || app_keys.contains(&change.key))
-                && routes.policy.read(&change.key).is_ok()
-        })
+        .filter(|change| sources.contains(&change.applied) || app_keys.contains(&change.key))
         .map(|change| change.key.clone())
+        .collect::<BTreeSet<_>>();
+    request_restore(routes, &selected).map_err(|e| e.to_string())?;
+    let keys = selected
+        .into_iter()
+        .filter(|key| routes.policy.read(key).is_ok())
         .collect();
     let report = routes
         .restore_keys_best_effort(&keys)
@@ -490,6 +667,26 @@ impl AppRouting {
         self.suppressed.remove(stable);
         self.retry_after.remove(stable);
     }
+    /// Call only after the external choices have been saved in preferences. Keep
+    /// the journal until then so a settings-write failure cannot lose the edit.
+    pub fn acknowledge_external(&mut self, routes: &mut Routes) -> Result<(), String> {
+        for app in &self.apps {
+            if app
+                .stable_id
+                .as_ref()
+                .is_some_and(|id| self.external_choices.contains(id))
+            {
+                // The app can exit after the snapshot. The saved exclusion is
+                // already durable; release its journal when it returns instead.
+                let Ok(binding) = routes.policy.bind_process(app.process_id) else {
+                    continue;
+                };
+                release_assignments(routes, &app_keys(&binding).into_iter().collect())
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+        Ok(())
+    }
     pub fn restore_live(&mut self, routes: &mut Routes, sonar: &State) -> Result<(), String> {
         let mut keys = BTreeSet::new();
         for app in &sonar.applications {
@@ -499,7 +696,13 @@ impl AppRouting {
         }
         // GG can stop reporting sessions while the app process is still alive.
         // Existing verified process bindings remain independently readable.
-        for change in routes.store.load().map_err(|e| e.to_string())?.changes {
+        let changes = routes.store.load().map_err(|e| e.to_string())?.changes;
+        request_restore(
+            routes,
+            &changes.iter().map(|change| change.key.clone()).collect(),
+        )
+        .map_err(|e| e.to_string())?;
+        for change in changes {
             if routes.policy.read(&change.key).is_ok() {
                 keys.insert(change.key);
             }
@@ -599,12 +802,14 @@ impl AppRouting {
         let keys = app_keys(&identity);
         // GG's application endpoint operates on active streams. Its own frontend
         // filters inactive sessions out; an inactive PUT can succeed without writing
-        // any policy. Persist the next-playback route to the Sonar virtual device
-        // through the same journaled Windows policy controller instead.
+        // any policy. A Windows-side edit can also leave GG's stream flagged as
+        // unroutable. Persist the next-playback preference in either case, without
+        // asking GG to force a broken/current stream to move.
         if state.applications.iter().any(|app| {
             app.process_id == pid
                 && app.process_name == name
-                && app.activity == jack_sonar::sonar::models::ApplicationActivity::Inactive
+                && (app.activity == jack_sonar::sonar::models::ApplicationActivity::Inactive
+                    || app.routing_error)
         }) {
             let selected = keys[..2].to_vec(); // Preserve Communications, as GG does.
             if let Err(error) = routes.apply_batch(
@@ -674,6 +879,7 @@ impl AppRouting {
     ) {
         self.apps.clear();
         self.warnings.clear();
+        self.external_choices.clear();
         // Rebind independently of classification. A restarted app may no longer
         // have a rule or appear in GG, but its old undo record still needs recovery.
         let journal = match routes.store.load() {
@@ -688,9 +894,7 @@ impl AppRouting {
             journal
                 .changes
                 .iter()
-                .filter(|change| {
-                    change.phase != Phase::Applied || routes.policy.read(&change.key).is_err()
-                })
+                .filter(|change| change.phase != Phase::Applied)
                 .map(|change| change.key.clone()),
         );
         if !journal.changes.is_empty() {
@@ -714,10 +918,6 @@ impl AppRouting {
                 .or_default()
                 .insert(source.endpoint_id.clone());
         }
-        let has_owned = routes
-            .store
-            .load()
-            .is_ok_and(|journal| !journal.changes.is_empty());
         let live: BTreeSet<_> = sonar.applications.iter().map(|a| a.process_id).collect();
         self.identities.retain(|pid, _| live.contains(pid));
         if !settings.channel_separation_enabled
@@ -766,11 +966,10 @@ impl AppRouting {
             let Some((target, origin)) =
                 target.filter(|_| !settings.sonar_auto_exclusions.contains(&identity.stable_id))
             else {
-                if has_owned
-                    && settings.channel_separation_enabled
-                    && let Err(error) = self.clear(routes, app.process_id)
-                {
-                    view.message = Some(error);
+                // Missing classification is not an explicit request to undo a
+                // successful assignment (publisher/session discovery can lag).
+                if settings.sonar_auto_exclusions.contains(&identity.stable_id) {
+                    self.external_choices.insert(identity.stable_id.clone());
                 }
                 view.origin = if settings.sonar_auto_exclusions.contains(&identity.stable_id) {
                     "original"
@@ -788,6 +987,7 @@ impl AppRouting {
                 continue;
             }
             if self.suppressed.contains(&identity.stable_id) {
+                self.external_choices.insert(identity.stable_id.clone());
                 view.origin = "external".into();
                 view.message = Some(
                     "External app route preserved; assign again to resume Jack control".into(),
@@ -830,8 +1030,8 @@ impl AppRouting {
                     .is_ok_and(|value| value.as_deref() != Some(&c.applied))
             });
             if foreign {
-                let _ = routes.restore_keys_best_effort(&keys.into_iter().collect());
                 self.suppressed.insert(identity.stable_id.clone());
+                self.external_choices.insert(identity.stable_id.clone());
                 view.origin = "external".into();
                 view.message = Some("External app route preserved".into());
                 self.apps.push(view);
@@ -850,19 +1050,19 @@ impl AppRouting {
                     .read(k)
                     .is_ok_and(|v| v.as_deref() == Some(&source.endpoint_id))
             });
-            // Respect existing explicit external per-app policy for automatic rules.
+            // An external per-app preference wins over a previously saved Jack rule.
             let external_override = owned.is_empty()
-                && origin == "automatic"
                 && keys
                     .iter()
                     .any(|k| routes.policy.read(k).is_ok_and(|v| v.is_some()));
             if external_override && !policy_is_target {
+                self.external_choices.insert(identity.stable_id.clone());
                 view.origin = "external".into();
                 view.message = Some("Existing app preference preserved".into());
                 self.apps.push(view);
                 continue;
             }
-            if !policy_is_target && app.route.channel() != Some(target) && !app.routing_error {
+            if !policy_is_target {
                 if self
                     .retry_after
                     .get(&identity.stable_id)
@@ -902,11 +1102,7 @@ impl AppRouting {
                 let pending: BTreeSet<_> = journal
                     .changes
                     .iter()
-                    .filter(|change| {
-                        self.recovery_keys.contains(&change.key)
-                            || change.phase != Phase::Applied
-                            || routes.policy.read(&change.key).is_err()
-                    })
+                    .filter(|change| change.phase != Phase::Applied)
                     .map(|change| match &change.key {
                         RouteKey::App { stable_app_id, .. } => stable_app_id.clone(),
                         RouteKey::Default { .. } => "Windows defaults".into(),
@@ -923,8 +1119,10 @@ impl AppRouting {
     }
     pub fn clear(&mut self, routes: &mut Routes, pid: u32) -> Result<(), String> {
         let binding = routes.policy.bind_process(pid).map_err(|e| e.to_string())?;
+        let keys = app_keys(&binding).into_iter().collect();
+        request_restore(routes, &keys).map_err(|e| e.to_string())?;
         let report = routes
-            .restore_keys_best_effort(&app_keys(&binding).into_iter().collect())
+            .restore_keys_best_effort(&keys)
             .map_err(|e| e.to_string())?;
         self.remember_recovery(&report);
         if !report.complete {
@@ -934,10 +1132,38 @@ impl AppRouting {
     }
 }
 
+/// A user's external edit ends our ownership; do not undo other roles while
+/// acknowledging it. Unfinished transactions still retain their recovery record.
+fn release_assignments<P: AudioPolicy, S: JournalStore>(
+    routes: &mut RouteController<P, S>,
+    keys: &BTreeSet<RouteKey>,
+) -> Result<(), RoutingError> {
+    let mut journal = routes.store.load()?;
+    let before = journal.changes.len();
+    journal
+        .changes
+        .retain(|change| change.phase != Phase::Applied || !keys.contains(&change.key));
+    if before != journal.changes.len() {
+        routes.store.save(&journal)?;
+    }
+    Ok(())
+}
+
 fn recover_pending_routes<P: AudioPolicy, S: JournalStore>(
     routes: &mut RouteController<P, S>,
     pending: &mut BTreeSet<RouteKey>,
 ) -> Result<(), String> {
+    // Derive intent from the durable phase, including undo requested while an app
+    // was closed. Never infer undo from a failed read or a stale PID binding.
+    *pending = routes
+        .store
+        .load()
+        .map_err(|e| e.to_string())?
+        .changes
+        .into_iter()
+        .filter(|change| change.phase != Phase::Applied)
+        .map(|change| change.key)
+        .collect();
     if pending.is_empty() {
         return Ok(());
     }

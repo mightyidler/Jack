@@ -113,8 +113,18 @@ async function fetchBytes(url) {
   return Buffer.from(await response.arrayBuffer());
 }
 
+// Shared CI IPs can exhaust GitHub's anonymous REST quota. Only release metadata
+// uses the CI credential; fetchBytes always verifies the real anonymous updater.
+export async function latestReleaseMetadata({
+  authenticated = Boolean(process.env.GH_TOKEN || process.env.GITHUB_TOKEN),
+  authenticatedRequest = () => execFileSync('gh', ['api', `repos/${repository}/releases/latest`], {encoding: 'utf8'}),
+  anonymousRequest = () => fetchBytes(`https://api.github.com/repos/${repository}/releases/latest`),
+} = {}) {
+  return JSON.parse((await (authenticated ? authenticatedRequest() : anonymousRequest())).toString());
+}
+
 export async function verifyPublished(directory, version) {
-  const release = JSON.parse((await fetchBytes(`https://api.github.com/repos/${repository}/releases/latest`)).toString());
+  const release = await latestReleaseMetadata();
   validateRelease(release, version, true);
   const manifest = JSON.parse((await fetchBytes(endpoint)).toString());
   const signature = (await fetchBytes(`${installerUrl(version)}.sig`)).toString();
@@ -133,7 +143,7 @@ async function main() {
   const [mode, directory] = process.argv.slice(2);
   if (!mode) return;
   if (mode === '--preflight') {
-    const latest = JSON.parse((await fetchBytes(`https://api.github.com/repos/${repository}/releases/latest`)).toString());
+    const latest = await latestReleaseMetadata();
     assert.ok(isNewerVersion(version, latest.tag_name.replace(/^v/, '')), 'Refusing to replace an equal or newer public release');
     console.log(`Release preflight: v${version} is newer than public ${latest.tag_name}.`);
     return;

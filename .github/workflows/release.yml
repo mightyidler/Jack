@@ -52,6 +52,8 @@ jobs:
         working-directory: desktop
       - run: node tools/verify-release.mjs
       - run: node tools/verify-release.mjs --preflight
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - run: node --test tools/verify-release.test.mjs
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_tests }}
       - run: cargo fmt --all -- --check
@@ -111,6 +113,8 @@ jobs:
           gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --notes-file docs/release-notes.md --draft=false --latest
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Verify public update endpoint without authentication
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: pwsh
         run: |
           $assets = Join-Path $env:RUNNER_TEMP 'jack-public-assets'

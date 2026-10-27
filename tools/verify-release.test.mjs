@@ -1,6 +1,22 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {validateManifest, validateRelease, prepareManifest, installerName, installerUrl, isNewerVersion} from './verify-release.mjs';
+import {validateManifest, validateRelease, prepareManifest, installerName, installerUrl, isNewerVersion, latestReleaseMetadata} from './verify-release.mjs';
+
+test('CI release metadata avoids anonymous REST quotas while local verification can remain anonymous', async () => {
+  const payload = JSON.stringify({tag_name: 'v0.1.12', draft: false});
+  let authenticatedCalls = 0;
+  let anonymousCalls = 0;
+  const requests = {
+    authenticatedRequest: () => { authenticatedCalls++; return payload; },
+    anonymousRequest: () => { anonymousCalls++; return Buffer.from(payload); },
+  };
+  assert.equal((await latestReleaseMetadata({authenticated: true, ...requests})).tag_name, 'v0.1.12');
+  assert.equal(authenticatedCalls, 1);
+  assert.equal(anonymousCalls, 0);
+  assert.equal((await latestReleaseMetadata({authenticated: false, ...requests})).draft, false);
+  assert.equal(anonymousCalls, 1);
+  await assert.rejects(latestReleaseMetadata({authenticated: true, ...requests, authenticatedRequest: () => { throw new Error('metadata denied'); }}), /metadata denied/);
+});
 
 const version = '0.1.6';
 const signature = Buffer.from('untrusted comment: signature from tauri secret key\nfixture').toString('base64');
